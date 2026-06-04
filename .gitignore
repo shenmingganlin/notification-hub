@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+
+# Hana local runtime data
+.hanako/
+data/
+plugin-data/
+custom-toast/
+custom-toast-clicks/
+notification-clicks.jsonl
+notifications.jsonl
+
+# Smoke-test runtime data
+.smoke-data-*/
+.smoke-interact/
+.smoke-todo-style/
+helper/.smoke-*.ps1
+helper/.smoke-*.mjs
+helper/.watch-*.ps1
+
+# Helper build outputs
+helper/bin/
+helper/obj/
+helper/publish/
+helper/*.bak
+helper/*.tmp
+helper/*.old
+helper/*.backup*
+helper/*.before-*.exe
+helper/*backup*.exe
+helper/*before*.exe
+helper/*test*.exe
+helper/*new*.exe
+
+# Keep the final helper binary shipped by this plugin
+!helper/notification-toast-helper.exe
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+*.old
+.DS_Store
+Thumbs.db
+
+# Local editor state
+.vscode/
+.idea/
+
+# Archives generated during release
+*.zip
+*.tar
+*.tar.gz
