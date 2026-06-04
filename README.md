@@ -12,6 +12,10 @@
   <img alt="License" src="https://img.shields.io/badge/license-MIT-7bd88f" />
 </p>
 
+<p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 > This is what happens when a notification plugin stops behaving like a gray system popup and starts behaving like a living desktop creature.
 
 ---
