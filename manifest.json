@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "notification-hub",
   "name": "Notification Hub",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "对话结束与频道新消息的桌面通知系统,支持头像、堆叠、角色风格背景,并在右上角小组件中查看通知历史",
   "minAppVersion": "0.158.0",
   "trust": "full-access",
@@ -33,20 +33,78 @@
         "enableChannelNotification": {
           "type": "boolean",
           "title": "频道消息通知",
-          "description": "频道有新消息时在桌面右下角弹窗(无声音)",
+          "description": "频道有新消息时在桌面右下角弹窗。",
           "default": true
         },
-        "enableConversationSound": {
-          "type": "boolean",
-          "title": "聊天提示音",
-          "description": "Agent 对话回复完成时播放提示音。",
-          "default": true
+        "conversationNotificationSoundTheme": {
+          "type": "string",
+          "title": "聊天提示音主题",
+          "description": "Agent 对话回复完成时使用的提示音。选择“自定义声音”后使用聊天自定义提示音路径。",
+          "enum": [
+            "ding",
+            "chime",
+            "notify",
+            "system",
+            "alert",
+            "alarm",
+            "custom",
+            "off"
+          ],
+          "enumNames": [
+            "铃铛叮声",
+            "钟声",
+            "Windows 通知音",
+            "系统提示音",
+            "警报提示音",
+            "警铃提示音",
+            "自定义声音",
+            "静音"
+          ],
+          "default": "chime"
         },
-        "enableChannelSound": {
-          "type": "boolean",
-          "title": "频道提示音",
-          "description": "频道新消息播放提示音。默认关闭,避免群聊刷屏时打扰。",
-          "default": false
+        "conversationCustomNotificationSoundPath": {
+          "type": "string",
+          "title": "聊天自定义提示音路径",
+          "description": "聊天提示音主题选择“自定义声音”时使用的本地音频文件路径。支持 wav、mp3、m4a、aac、wma。播放失败会回退到内置钟声或系统提示音。",
+          "default": "",
+          "ui": {
+            "control": "text"
+          }
+        },
+        "channelNotificationSoundTheme": {
+          "type": "string",
+          "title": "频道提示音主题",
+          "description": "频道新消息使用的提示音。选择“自定义声音”后使用频道自定义提示音路径。",
+          "enum": [
+            "ding",
+            "chime",
+            "notify",
+            "system",
+            "alert",
+            "alarm",
+            "custom",
+            "off"
+          ],
+          "enumNames": [
+            "铃铛叮声",
+            "钟声",
+            "Windows 通知音",
+            "系统提示音",
+            "警报提示音",
+            "警铃提示音",
+            "自定义声音",
+            "静音"
+          ],
+          "default": "chime"
+        },
+        "channelCustomNotificationSoundPath": {
+          "type": "string",
+          "title": "频道自定义提示音路径",
+          "description": "频道提示音主题选择“自定义声音”时使用的本地音频文件路径。支持 wav、mp3、m4a、aac、wma。播放失败会回退到内置钟声或系统提示音。",
+          "default": "",
+          "ui": {
+            "control": "text"
+          }
         },
         "enableKeywordImportance": {
           "type": "boolean",
@@ -71,8 +129,8 @@
         },
         "notificationSoundTheme": {
           "type": "string",
-          "title": "通知提示音",
-          "description": "选择重要通知、状态警报和对话完成通知使用的提示音。默认使用钟声,比系统警告音更柔和。",
+          "title": "状态/重要通知提示音",
+          "description": "选择状态警报、错误通知和其他未分来源通知使用的提示音。聊天和频道可在通知中心设置页里分别配置。",
           "enum": [
             "ding",
             "chime",
@@ -80,6 +138,7 @@
             "system",
             "alert",
             "alarm",
+            "custom",
             "off"
           ],
           "enumNames": [
@@ -89,9 +148,19 @@
             "系统提示音",
             "警报提示音",
             "警铃提示音",
+            "自定义声音",
             "静音"
           ],
           "default": "chime"
+        },
+        "customNotificationSoundPath": {
+          "type": "string",
+          "title": "状态/重要自定义提示音路径",
+          "description": "状态/重要通知提示音选择“自定义声音”时使用的本地音频文件路径。支持 wav、mp3、m4a、aac、wma。聊天和频道也会把这个旧字段作为兼容兜底。",
+          "default": "",
+          "ui": {
+            "control": "text"
+          }
         },
         "enableStatusNotifications": {
           "type": "boolean",
@@ -182,6 +251,50 @@
             "月夜全息包"
           ],
           "default": "custom"
+        },
+        "toastLayout": {
+          "type": "string",
+          "title": "弹窗布局",
+          "description": "控制头像、标题、正文、角色名和标签的排版结构。",
+          "enum": [
+            "hero",
+            "clean",
+            "headline",
+            "dialogue",
+            "timeline"
+          ],
+          "enumNames": [
+            "角色名片",
+            "清透卡片",
+            "标题电报",
+            "对话便签",
+            "时间流卡片"
+          ],
+          "default": "clean"
+        },
+        "toastScale": {
+          "type": "number",
+          "title": "弹窗大小",
+          "description": "等比例缩放整张自定义弹窗，文字、头像、间距会一起缩放。1.0 为原始大小。",
+          "minimum": 0.7,
+          "maximum": 1.2,
+          "default": 1.0
+        },
+        "toastOffsetX": {
+          "type": "integer",
+          "title": "弹窗水平偏移",
+          "description": "调整弹窗显示位置。负数向左，正数向右。",
+          "minimum": -1600,
+          "maximum": 1600,
+          "default": 0
+        },
+        "toastOffsetY": {
+          "type": "integer",
+          "title": "弹窗垂直偏移",
+          "description": "调整弹窗显示位置。负数向上，正数向下。",
+          "minimum": -1000,
+          "maximum": 1000,
+          "default": 0
         },
         "toastTransportMode": {
           "type": "string",
@@ -307,6 +420,14 @@
           "maximum": 3.0,
           "default": 1.0
         },
+        "particleIntervalEffect": {
+          "type": "number",
+          "title": "粒子间隔效果",
+          "description": "调节粒子出现的时间间隔。0 为原始瞬爆，数值越大越像连续喷涌/星雨。",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0
+        },
         "entranceVisual": {
           "type": "string",
           "title": "弹窗登场效果",
@@ -421,10 +542,44 @@
           ],
           "default": "lively"
         },
+        "panelTheme": {
+          "type": "string",
+          "title": "面板主题",
+          "description": "右上角「通」按钮和通知中心面板的主题。自动模式会跟随当前组合包。",
+          "enum": [
+            "auto",
+            "classic",
+            "minimal",
+            "glass",
+            "tech",
+            "aurora",
+            "sakura-storm",
+            "obsidian",
+            "hologram",
+            "paper",
+            "ember",
+            "moonlight"
+          ],
+          "enumNames": [
+            "自动匹配组合包",
+            "经典柔和",
+            "极简纸片",
+            "琉璃玻璃",
+            "霓虹赛博",
+            "极光晶格",
+            "樱暴绯云",
+            "黑金机械",
+            "全息薄膜",
+            "温润纸笺",
+            "余烬彗星",
+            "月夜全息"
+          ],
+          "default": "auto"
+        },
         "notificationWidgetTheme": {
           "type": "string",
-          "title": "通知小组件主题",
-          "description": "右上角「通」小组件的主题。自动会跟随系统或 Hana 当前明暗倾向。",
+          "title": "通知小组件明暗模式（旧字段）",
+          "description": "旧版明暗设置，仅用于兼容旧配置。新的通知中心面板外观请使用「面板主题」。",
           "enum": [
             "auto",
             "light",

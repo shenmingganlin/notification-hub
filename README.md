@@ -1,8 +1,8 @@
 # 🌸 Notification Hub for HanaAgent
 
 <p align="center">
-  <b>Turn HanaAgent notifications into a tiny desktop visual engine.</b><br />
-  Agent replies, channel messages, task failures, keyword alerts, notification history, custom toast physics, particle exits, visual combo packs, and a widget dashboard, all packed into one full-access Hana plugin.
+  <b>Still letting Hanako finish replies quietly in the background?</b><br />
+  A desktop notification hub for HanaAgent that brings replies, channel messages, task status, and important events right to your screen.
 </p>
 
 <p align="center">
@@ -16,152 +16,288 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-> This is what happens when a notification plugin stops behaving like a gray system popup and starts behaving like a living desktop creature.
+---
+
+## Has this happened to you?
+
+You ask Hanako to think through something.  
+Then you switch away, write code, read docs, open far too many browser tabs, and briefly become a different person.
+
+Some time later, you wonder:
+
+> “Wait. Did she finish already?”
+
+You go back.  
+She did finish. Gracefully. Quietly. Politely.
+
+A little too politely.
+
+Do you really want your assistant to be that silent?
+
+---
+
+Or maybe a channel is alive with messages.  
+Agents are trading context in the corner.  
+A background job has completed.  
+A tool failed.  
+A message containing `bug`, `failed`, or `done` just appeared.
+
+Your desktop, meanwhile, is perfectly calm.
+
+That calm is suspicious.
+
+---
+
+And then there is notification history.
+
+You see a notification flash by, blink once, and immediately forget what it was.
+
+System notification? Gone.  
+Chat window? Start digging.  
+Log files? Good luck.
+
+Notification Hub exists for exactly this small but annoying gap.
 
 ---
 
 ## ✨ What is this?
 
-**Notification Hub** is a desktop notification center for [HanaAgent](https://github.com/liliMozi/openhanako).
+**Notification Hub** is a desktop notification center plugin for [HanaAgent](https://github.com/liliMozi/openhanako).
 
-It listens to HanaAgent events and turns them into beautiful, configurable, clickable notifications:
+It turns the things you probably want to know about into notifications that are:
 
-- conversation finished
-- channel message arrived
-- important keyword hit
-- background task done
-- error / failure / status alert
-- manual test notification
-- notification history in a compact widget
+- visible
+- clickable
+- configurable
+- good-looking
+- searchable later
 
-And then it goes much further: custom toast windows, spring stacking, particle exits, role-colored themes, preview-friendly visual packs, sound themes, channel aggregation, source tinting, and a real notification store.
+Hanako finished a reply?  
+It tells you.
 
-If HanaAgent is your agent cockpit, Notification Hub is the glowing instrument panel that tells you what just happened without making you dig through logs.
+A channel received a message?  
+It tells you.
+
+A background task completed or failed?  
+It tells you.
+
+An important keyword appeared?  
+It tells you.
+
+You missed the popup?  
+It keeps a record.
+
+Think of it as a tiny front desk for HanaAgent.  
+Or a desktop radar.  
+Or, if you enable enough particles, a very enthusiastic little notification creature.
+
+The point is simple:
+
+> Important events should not disappear quietly into the background.
 
 ---
 
-## 🔥 Feature blast
+## 🔥 What can it do?
 
-### 🎭 Custom desktop toast renderer
+### 🎭 Make completed replies visible
 
-Notification Hub ships with a Windows helper renderer and uses it to display custom desktop toasts instead of plain system notifications.
+When Hanako finishes replying, Notification Hub can show a custom desktop toast.
 
-You get:
+Not just a gray system popup.  
+A configurable card with layout, scale, offset, sound, motion, particles, and style.
 
-- right-bottom floating toast cards
-- clickable notifications
-- managed toast stacking
-- TCP delivery path for fast toast dispatch
-- fallback file delivery path
-- clean unload / manager lifecycle handling
-- independent and managed transport modes
+Keep it calm.  
+Make it flashy.  
+Your desktop, your rules.
 
-### 🌈 Visual combo packs
+### 💬 Make channel messages less dependent on luck
 
-One dropdown can transform the whole notification personality:
+Channels can notify you when new messages arrive.
 
-| Pack | Mood |
-| --- | --- |
-| `magicAir` | glass, bubbles, soft magic motion |
-| `cyberBurst` | neon tech, pixel rain, sharp impact |
-| `auroraPrism` | prism entrance, rainbow palette, orbit decay |
-| `physicalToys` | playful physics, windmills, exaggerated motion |
-| `sakuraOverdrive` | high-density sakura storm, wild physics |
-| `blackGoldMachine` | obsidian card, metal gears, black-gold palette |
-| `emberComet` | hologram card, comet particles, ember glow |
-| `moonlitHolo` | moonlight palette, crescent particles, soft hologram |
+If a channel gets busy, Notification Hub can aggregate messages instead of turning your desktop into a notification machine gun.
 
-Combo packs are **templates, not locks**. Pick a pack, then override individual fields like card style, particle shape, entrance visual, motion track, or palette.
+> Quiet channel: individual reminders.  
+> Busy channel: summary notification.
 
-### 💥 Particle exits and motion tracks
+Polite chaos.
 
-The toast does not merely disappear. It leaves.
+### 🚦 Promote important messages automatically
 
-Particle shapes include:
+Ordinary messages can stay soft.  
+Important ones should stand out.
+
+Keyword examples:
 
 ```text
-moss, sakura, snowflake, butterfly, bubble, windmill, star, spark,
-shard, leaf, pixel, comet, gear, ember, crescent, slash
+urgent
+important
+bug
+error
+failed
+done
+紧急
+重要
+报错
+失败
+完成了
 ```
 
-Dismiss motion tracks include:
+When a keyword matches, the notification can become important and use stronger visuals or sounds.
+
+Most of the time, it is a front desk.  
+When something breaks, it becomes an alarm.
+
+### 🧺 Keep notification history
+
+A notification should not be a shooting star.
+
+Notification Hub contributes a widget:
 
 ```text
-drift, circle-burst, rect-burst, x-burst, vortex, ribbon-flow,
-gravity-fall, orbit-decay, bubble-rise, windmill-gust, shatter-lines,
-pixel-rain, magnet-snap
+通 / Notifications
 ```
 
-Manual dismiss also supports:
+It can show:
+
+- conversation notifications
+- channel notifications
+- status notifications
+- error notifications
+- important alerts
+
+Missed it?  
+It is in the basket.
+
+### 🌈 Make notifications look like they belong in HanaAgent
+
+Notification Hub includes visual combo packs:
 
 ```text
-click-burst
+magicAir
+cyberBurst
+auroraPrism
+physicalToys
+sakuraOverdrive
+blackGoldMachine
+emberComet
+moonlitHolo
 ```
 
-So automatic timeout and user click can have different physics and visual language.
+Want glassy softness? Yes.  
+Cyber neon? Yes.  
+Sakura overload? Somehow, also yes.  
+Black-gold machine vibes? Absolutely.
 
-### 🧠 Smart event routing
+Toasts can also disappear with particles and motion instead of simply vanishing.
 
-Notification Hub understands multiple HanaAgent event types:
+They can drift, burst, fall, rise, shatter, magnet-snap, or turn into pixel rain.
 
-- `message_end` for finished agent replies
-- `channel_new_message` for channel traffic
-- `notification` for engine/native notify takeover
-- `error`, `cron_job_done`, `activity_update` for status monitoring
+If a notification must interrupt you, it may as well do it with taste.
 
-It avoids common notification traps:
+### 🧩 Choose a toast layout
 
-- skips tool-call-only `message_end`
-- skips aborted replies
-- skips subagent internal sessions
-- skips phone bridge internal sessions
-- avoids self-recursive notification takeover
-- filters system senders
-
-### 🚦 Importance and keyword alerts
-
-Important messages can be promoted automatically by keyword.
-
-Default examples:
+Supported toast layouts:
 
 ```text
-紧急, bug, 报错, 失败, 完成了, error, failed
+hero
+clean
+headline
+dialogue
+timeline
 ```
 
-Important notifications can use stronger visuals and sounds without making every normal message noisy.
+The default is `clean`: readable, balanced, and not trying too hard.
 
-### 🧺 Channel aggregation
+### 🎨 Theme the notification panel
 
-Busy channels can flood a desktop. Notification Hub can aggregate ordinary channel messages inside a time window, while still letting important messages break through immediately.
-
-Configurable knobs:
-
-- aggregation enabled / disabled
-- aggregation window seconds
-- aggregation threshold
-
-### 🪟 Notification widget
-
-The plugin contributes a Hana widget titled **通 / Notifications**.
-
-It provides a notification history panel with:
-
-- conversation / channel / status records
-- optional source tinting
-- light / dark / auto theme
-- large, spacious reading density
-- clear notifications tool
-- list notifications tool
-
-### 🔊 Sound themes
-
-Choose the sound personality:
+The notification widget supports panel themes:
 
 ```text
-ding, chime, notify, system, alert, alarm, off
+auto
+classic
+minimal
+glass
+tech
+aurora
+sakura-storm
+obsidian
+hologram
+paper
+ember
+moonlight
 ```
 
-Conversation, channel, important, and status notification sounds can be configured separately.
+With `auto`, the panel can follow the selected visual combo pack, so the popup and the history panel feel like they came from the same world.
+
+### 🔊 Give sounds a personality
+
+Sound themes:
+
+```text
+ding
+chime
+notify
+system
+alert
+alarm
+custom
+off
+```
+
+Custom sound formats:
+
+```text
+wav
+mp3
+m4a
+aac
+wma
+```
+
+Conversation, channel, status, and important notifications can use different sound strategies.
+
+Technically, your notifications can have their own theme song.  
+Use this power responsibly.
+
+---
+
+## One-sentence summary
+
+Notification Hub is the notification butler for HanaAgent.
+
+It nudges you when:
+
+- Hanako finishes a reply
+- a channel receives a message
+- a background task ends
+- a tool or workflow fails
+- an important keyword appears
+- system status changes
+
+And it does so with:
+
+- visual hierarchy
+- sound
+- clickable actions
+- notification history
+- enough style to avoid looking like a forgotten system dialog
+
+---
+
+## 🧠 Who is it for?
+
+If you only chat with HanaAgent once in a while, this may be a little luxurious.
+
+If you often:
+
+- let Hanako think in the background
+- use channels or agent collaboration
+- run background tasks
+- want to catch errors and completion states
+- care about desktop UI aesthetics
+- hate the “what was that notification?” moment
+
+then Notification Hub may quickly become infrastructure.
 
 ---
 
@@ -170,13 +306,22 @@ Conversation, channel, important, and status notification sounds can be configur
 ```text
 notification-hub/
 ├─ manifest.json                    # Hana plugin metadata and settings schema
-├─ index.js                         # lifecycle, EventBus routing, notification orchestration
+├─ index.js                         # lifecycle, EventBus routing, orchestration
 ├─ lib/
 │  ├─ notification-config.js         # config normalization and runtime config
 │  ├─ effect-registry.js             # visual packs, styles, motions, particles, themes
 │  ├─ custom-toast.js                # custom toast transport and helper manager client
 │  ├─ notification-store.js          # persistent notification history
-│  └─ agent-resolver.js              # agent identity and theme resolution
+│  ├─ agent-resolver.js              # agent identity and theme resolution
+│  ├─ delivery/
+│  │  └─ toast-decoration.js         # notification decoration
+│  ├─ policy/
+│  │  └─ notification-policy.js      # notification policy decisions
+│  └─ sound/
+│     ├─ sound-decision.js           # sound decision logic
+│     ├─ sound-registry.js           # sound theme registry
+│     ├─ sound-resolver.js           # sound path resolution
+│     └─ windows-sound-picker.js     # Windows sound picker helper
 ├─ routes/
 │  └─ widget.js                      # widget HTML route
 ├─ tools/
@@ -186,15 +331,21 @@ notification-hub/
 ├─ helper/
 │  ├─ NotificationToastHelper.cs     # Windows toast helper source
 │  ├─ NotificationToastHelper.csproj # helper project file
-│  └─ notification-toast-helper.exe  # prebuilt Windows helper used by the plugin
+│  └─ notification-toast-helper.exe  # prebuilt helper
 └─ scripts/
    ├─ check-notification-config.mjs
    ├─ check-notification-types.mjs
    ├─ check-widget-preview.mjs
-   └─ check-test-notify.mjs
+   ├─ check-test-notify.mjs
+   ├─ check-sound-system.mjs
+   └─ check-runtime-regressions.mjs
 ```
 
-The important design choice: visual capabilities are centralized in `lib/effect-registry.js`. New styles, particles, motions, themes, and combo packs should be registered there first, then wired into renderer support if needed. This keeps the plugin from becoming a pile of scattered visual branches.
+Core design rule:
+
+> Visual capabilities are registered in `lib/effect-registry.js` first, then consumed by the config system and renderer.
+
+This keeps styles, particles, motions, themes, and combo packs from turning into scattered branches across the codebase.
 
 ---
 
@@ -204,19 +355,29 @@ The important design choice: visual capabilities are centralized in `lib/effect-
 
 - Windows
 - HanaAgent `>= 0.158.0`
-- Plugin full-access permission enabled for this plugin
+- Full-access permission enabled for this plugin
 
 ### Manual install
 
-Clone or download this repository into Hana's plugin directory:
+Download the latest release zip:
+
+```text
+notification-hub-0.2.0.zip
+```
+
+Extract it to:
 
 ```text
 %USERPROFILE%\.hanako\plugins\notification-hub
 ```
 
-Then enable/reload the plugin from HanaAgent's plugin settings.
+Then enable or reload the plugin from HanaAgent plugin settings.
 
-For development, install the source directory through HanaAgent's plugin dev tools. The plugin id is:
+### Development install
+
+For development, install the source directory through HanaAgent's plugin dev tools.
+
+Plugin id:
 
 ```text
 notification-hub
@@ -226,158 +387,136 @@ notification-hub
 
 ## 🧪 Test
 
-Run the focused validation suite:
+Syntax checks:
 
 ```bash
-node --check index.js
-node --check routes/widget.js
-node --check tools/test-notify.js
-node --check lib/custom-toast.js
-node --check lib/effect-registry.js
-node --check lib/notification-config.js
-node --check lib/notification-store.js
-node --check lib/agent-resolver.js
-node --check scripts/check-notification-config.mjs
-node --check scripts/check-notification-types.mjs
-node --check scripts/check-widget-preview.mjs
-node --check scripts/check-test-notify.mjs
-node --check .smoke-channel-aggregation.mjs
-node --check .smoke-status-notifications.mjs
-
-node scripts/check-notification-config.mjs
-node scripts/check-notification-types.mjs
-node scripts/check-widget-preview.mjs
-node scripts/check-test-notify.mjs
-node .smoke-channel-aggregation.mjs
-node .smoke-status-notifications.mjs
+npm run check
 ```
 
-Expected output:
+Regression tests:
+
+```bash
+npm test
+```
+
+Build the Windows helper:
+
+```bash
+dotnet build helper/NotificationToastHelper.csproj -c Release
+```
+
+Publish helper artifacts:
+
+```bash
+dotnet publish helper/NotificationToastHelper.csproj -c Release -o helper/publish
+```
+
+Current release-candidate validation:
 
 ```text
-notification config checks ok
-notification type checks ok
-widget preview checks ok
-test-notify checks ok
-channel aggregation smoke ok
-status notifications smoke ok
+npm run check
+npm test
+dotnet build helper/NotificationToastHelper.csproj -c Release
+dotnet publish helper/NotificationToastHelper.csproj -c Release -o helper/publish
 ```
 
 ---
 
-## 🛠 Build the Windows helper
+## ⚙️ Configuration
 
-A prebuilt helper executable is included for normal plugin use:
+Notification Hub exposes settings for:
 
-```text
-helper/notification-toast-helper.exe
-```
-
-To rebuild it yourself, install the .NET SDK and run:
-
-```bash
-cd helper
-dotnet publish -c Release -r win-x64 --self-contained false
-```
-
-Then copy the produced executable back to:
-
-```text
-helper/notification-toast-helper.exe
-```
-
----
-
-## ⚙️ Configuration highlights
-
-Notification Hub exposes a large settings surface in HanaAgent:
-
-- display mode: custom / native / off
-- visual combo pack
+- notification enablement
+- custom toast enablement
+- notification position
+- toast layout
+- toast scale
+- toast X/Y offsets
 - toast card style
-- particle shape
-- particle count scales
-- particle size scale
-- entrance visual
+- visual combo pack
+- particle shape, count, and size
 - auto dismiss motion
-- manual dismiss motion
+- manual click dismiss motion
 - physics preset
-- toast transport mode
-- sound theme
-- channel aggregation
-- keyword importance
-- widget theme
-- widget density
+- panel theme
 - source tinting
-- click action
+- channel aggregation
+- important keywords
+- conversation sound
+- channel sound
+- status/important sound
+- custom sound paths
 
-The plugin is designed so presets can give you instant taste, while individual fields remain tweakable.
-
----
-
-## 🧪 Public tools
-
-Agent-callable tools contributed by this plugin:
-
-| Tool | Purpose |
-| --- | --- |
-| `notification-hub_test-notify` | Send a test notification using the current display mode |
-| `notification-hub_list-notifications` | Read recent notification history |
-| `notification-hub_clear-notifications` | Clear stored notification history |
+Pick a visual combo pack if you want a quick setup.  
+Fine-tune the knobs if you enjoy knobs.
 
 ---
 
-## 🔐 Privacy and local data
+## 📦 Release package notes
 
-Notification history is stored locally in the plugin data directory managed by HanaAgent.
+The source repository stays clean and keeps source files, config, scripts, and documentation.
 
-This repository does not need API keys, cloud credentials, or external accounts.
+The release zip additionally includes helper runtime files:
 
-Before publishing your own fork, keep these out of git:
+```text
+helper/notification-toast-helper.exe
+helper/notification-toast-helper.dll
+helper/notification-toast-helper.deps.json
+helper/notification-toast-helper.runtimeconfig.json
+```
 
-- local notification history
-- smoke-test data directories
-- backup helper executables
-- temporary helper builds
-- personal HanaAgent data directories
-
-The included `.gitignore` is written for that.
+This allows manual installs to use the custom desktop toast renderer immediately.
 
 ---
 
-## 🧭 Roadmap ideas
+## 📝 Changelog
 
-- screenshot / GIF gallery for each visual combo pack
-- marketplace package metadata
-- more helper renderer themes
-- optional per-agent visual pack rules
-- import/export visual presets
-- richer widget filtering
-- cross-platform renderer backend if HanaAgent exposes a stable route
+See:
+
+```text
+CHANGELOG.md
+```
+
+---
+
+## 🛣️ Roadmap
+
+Possible future improvements:
+
+- split the C# helper into clearer modules
+- add JS/C# payload schema validation
+- more visual combo packs
+- more panel filtering options
+- finer per-agent notification policies
+- visual preset import/export
+- screenshot/GIF gallery for visual packs
+- cross-platform backend if HanaAgent exposes a stable cross-platform notification API
 
 ---
 
 ## 🤝 Contributing
 
-PRs are welcome, especially for:
+Issues, suggestions, and PRs are welcome.
 
-- new visual combo packs
+Good contribution areas:
+
+- new toast layouts
 - new particle shapes
-- new motion tracks
+- new dismiss motions
+- new visual combo packs
 - widget UI improvements
-- safer lifecycle handling
-- tests for config normalization and notification routing
+- config normalization tests
+- notification routing tests
+- documentation and screenshots
 
-Please keep new visual options centralized in `lib/effect-registry.js` and include a focused test when possible.
+If you want to work on the visual system, start here:
+
+```text
+lib/effect-registry.js
+```
 
 ---
 
 ## 📄 License
 
-MIT License.
-
----
-
-<p align="center">
-  <b>Notification Hub is a notification plugin, a visual toy box, and a tiny desktop event theatre for HanaAgent.</b>
-</p>
+MIT

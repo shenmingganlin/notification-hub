@@ -11,7 +11,6 @@ import { NotificationStore } from "./lib/notification-store.js";
 import { CustomToast } from "./lib/custom-toast.js";
 import {
   buildRuntimeConfig,
-  getToastThemeColors,
   intValue,
   normalizeDismissEffect,
   normalizeDismissMotionTrack,
@@ -23,8 +22,22 @@ import {
   normalizeToastStyle,
   normalizeToastTransportMode,
   numberValue,
-  parseKeywords,
 } from "./lib/notification-config.js";
+import {
+  decorateToastNotification,
+  normalizeHexColor,
+  resolveToastColors,
+  toastThemeColors,
+} from "./lib/delivery/toast-decoration.js";
+import {
+  parseNotificationKeywords,
+  resolveCustomSoundPath,
+  resolveImportance,
+  resolveNotificationCustomSoundPath,
+  resolveNotificationSoundTheme,
+  resolveStatusSoundTheme,
+  shouldPlaySound,
+} from "./lib/policy/notification-policy.js";
 
 export default class NotificationHubPlugin {
   async onload() {
@@ -57,12 +70,17 @@ export default class NotificationHubPlugin {
       log,
       sakuraEnabled: this._cfg.sakuraEnabled,
       sakuraTheme: this._cfg.sakuraTheme,
+      toastLayout: this._cfg.toastLayout,
+      toastScale: this._cfg.toastScale,
+      toastOffsetX: this._cfg.toastOffsetX,
+      toastOffsetY: this._cfg.toastOffsetY,
       toastStyle: this._cfg.toastStyle,
       dismissEffect: this._cfg.dismissEffect,
       particleShape: this._cfg.particleShape,
       autoParticleCountScale: this._cfg.autoParticleCountScale,
       manualParticleCountScale: this._cfg.manualParticleCountScale,
       particleSizeScale: this._cfg.particleSizeScale,
+      particleIntervalEffect: this._cfg.particleIntervalEffect,
       entranceVisual: this._cfg.entranceVisual,
       autoDismissMotion: this._cfg.autoDismissMotion,
       manualDismissMotion: this._cfg.manualDismissMotion,
@@ -125,17 +143,26 @@ export default class NotificationHubPlugin {
         try {
           const agentInfo = event.agentId ? this._agentResolver.get(event.agentId) : null;
           const primary = agentInfo?.theme?.primary || "#636e72";
-          this._emitDesktopNotification({
+          const notification = {
             id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            type: event.type || "notification",
-            title: event.title || "",
+            type: "status",
+            source: event.source || event.sessionPath || "notification",
+            title: event.title || "通知",
             body: event.body || "",
             agentId: event.agentId || "notification",
+            agentName: agentInfo?.displayName || event.agentName || "通知",
             primary,
             accent: agentInfo?.theme?.accent || primary,
-            emoji: agentInfo?.theme?.emoji || "",
+            emoji: agentInfo?.theme?.emoji || event.emoji || "🔔",
+            importance: event.importance || "normal",
+            matchedKeywords: [],
+            meta: { originalEventType: event.type, source: event.source || null, sessionPath },
+            sound: Boolean(event.sound),
+            soundTheme: event.soundTheme || this._resolveStatusSoundTheme(false),
+            customSoundPath: event.customSoundPath || this._resolveCustomSoundPath({ type: "status", customSoundPath: event.customSoundPath }),
             timestamp: new Date().toISOString(),
-          });
+          };
+          this._recordAndEmit(notification);
         } finally {
           this._handlingNotification = false;
         }
@@ -186,7 +213,8 @@ export default class NotificationHubPlugin {
       matchedKeywords: importance.keywords,
       meta: { stopReason: event.message?.stopReason, matchedKeywords: importance.keywords },
       sound: this._shouldPlaySound("conversation", importance.level),
-      soundTheme: this._cfg.notificationSoundTheme,
+      soundTheme: this._resolveNotificationSoundTheme("conversation", importance.level),
+      customSoundPath: this._resolveNotificationCustomSoundPath("conversation"),
     };
 
     this._recordAndEmit(notification);
@@ -230,7 +258,8 @@ export default class NotificationHubPlugin {
         timestamp: message.timestamp,
       },
       sound: this._shouldPlaySound("channel", importance.level),
-      soundTheme: this._cfg.notificationSoundTheme,
+      soundTheme: this._resolveNotificationSoundTheme("channel", importance.level),
+      customSoundPath: this._resolveNotificationCustomSoundPath("channel"),
     };
 
     if (this._maybeAggregateChannelNotification(notification)) return;
@@ -412,7 +441,7 @@ export default class NotificationHubPlugin {
       matchedKeywords: [],
       meta,
       sound: this._shouldPlaySound("status", importance),
-      soundTheme: isImportant ? "alert" : this._cfg.notificationSoundTheme,
+      soundTheme: this._resolveStatusSoundTheme(isImportant),
     };
 
     this._recordAndEmit(notification);
@@ -574,6 +603,14 @@ export default class NotificationHubPlugin {
     return buildRuntimeConfig(config || {});
   }
 
+  applySettingsUpdates(previousConfig = {}, updates = {}) {
+    return this._applyRuntimeConfigSnapshot({ ...(previousConfig || {}), ...(updates || {}) });
+  }
+
+  applyRuntimeConfigSnapshot(rawConfig = {}) {
+    return this._applyRuntimeConfigSnapshot(rawConfig || {});
+  }
+
   _maybeRefreshConfig(options = {}) {
     // Only refresh config when we're about to handle a real notification event,
     // not on transient events like tool-call message_end.
@@ -594,26 +631,15 @@ export default class NotificationHubPlugin {
       return this._cfg;
     }
 
+    return this._applyRuntimeConfigSnapshot(rawConfig, snapshot);
+  }
+
+  _applyRuntimeConfigSnapshot(rawConfig = {}, snapshot = this._configSnapshot(rawConfig)) {
     const previousConfig = this._cfg;
     this._lastRawConfigSnapshot = snapshot;
     this._cfg = this._buildRuntimeConfig(rawConfig);
     this._lastConfigRefresh = Date.now();
-    if (this._customToast) {
-      this._customToast.sakuraEnabled = this._cfg.sakuraEnabled;
-      this._customToast.sakuraTheme = this._cfg.sakuraTheme;
-      this._customToast.toastStyle = this._cfg.toastStyle;
-      this._customToast.dismissEffect = this._cfg.dismissEffect;
-      this._customToast.particleShape = this._cfg.particleShape;
-      this._customToast.autoParticleCountScale = this._cfg.autoParticleCountScale;
-      this._customToast.manualParticleCountScale = this._cfg.manualParticleCountScale;
-      this._customToast.particleSizeScale = this._cfg.particleSizeScale;
-      this._customToast.entranceVisual = this._cfg.entranceVisual;
-      this._customToast.autoDismissMotion = this._cfg.autoDismissMotion;
-      this._customToast.manualDismissMotion = this._cfg.manualDismissMotion;
-      this._customToast.physicsPreset = this._cfg.physicsPreset;
-      this._customToast.setTransportMode?.(this._cfg.toastTransportMode);
-      this._customToast.onClick = this._cfg.clickAction ? (click) => this._handleToastClick(click) : null;
-    }
+    this._applyCustomToastConfig();
     if (!this._cfg.enableChannel) {
       this._clearChannelAggregation();
     } else if (previousConfig?.enableChannelAggregation && !this._cfg.enableChannelAggregation) {
@@ -622,59 +648,39 @@ export default class NotificationHubPlugin {
     return this._cfg;
   }
 
+  _applyCustomToastConfig() {
+    if (!this._customToast) return;
+    this._customToast.sakuraEnabled = this._cfg.sakuraEnabled;
+    this._customToast.sakuraTheme = this._cfg.sakuraTheme;
+    this._customToast.toastLayout = this._cfg.toastLayout;
+    this._customToast.toastScale = this._cfg.toastScale;
+    this._customToast.toastOffsetX = this._cfg.toastOffsetX;
+    this._customToast.toastOffsetY = this._cfg.toastOffsetY;
+    this._customToast.toastStyle = this._cfg.toastStyle;
+    this._customToast.dismissEffect = this._cfg.dismissEffect;
+    this._customToast.particleShape = this._cfg.particleShape;
+    this._customToast.autoParticleCountScale = this._cfg.autoParticleCountScale;
+    this._customToast.manualParticleCountScale = this._cfg.manualParticleCountScale;
+    this._customToast.particleSizeScale = this._cfg.particleSizeScale;
+    this._customToast.particleIntervalEffect = this._cfg.particleIntervalEffect;
+    this._customToast.entranceVisual = this._cfg.entranceVisual;
+    this._customToast.autoDismissMotion = this._cfg.autoDismissMotion;
+    this._customToast.manualDismissMotion = this._cfg.manualDismissMotion;
+    this._customToast.physicsPreset = this._cfg.physicsPreset;
+    this._customToast.setTransportMode?.(this._cfg.toastTransportMode);
+    this._customToast.onClick = this._cfg.clickAction ? (click) => this._handleToastClick(click) : null;
+  }
+
   _decorateToastNotification(notification) {
-    const sakuraTheme = notification?.sakuraTheme || this._cfg.sakuraTheme;
-    const themeColors = this._toastThemeColors(sakuraTheme);
-    const colors = this._resolveToastColors(notification, themeColors);
-    return {
-      ...notification,
-      primary: colors.primary,
-      accent: colors.accent,
-      meta: {
-        ...(notification?.meta || {}),
-        toastColorSource: colors.source,
-      },
-      toastStyle: this._normalizeToastStyle(notification?.toastStyle || this._cfg.toastStyle),
-      dismissEffect: this._normalizeDismissEffect(notification?.dismissEffect || this._cfg.dismissEffect, this._cfg.sakuraEnabled),
-      particleShape: this._normalizeParticleShape(notification?.particleShape || this._cfg.particleShape, notification?.dismissEffect || this._cfg.dismissEffect),
-      autoParticleCountScale: this._clampDecimal(notification?.autoParticleCountScale, this._cfg.autoParticleCountScale, 0.2, 4.0),
-      manualParticleCountScale: this._clampDecimal(notification?.manualParticleCountScale, this._cfg.manualParticleCountScale, 0.2, 4.0),
-      particleSizeScale: this._clampDecimal(notification?.particleSizeScale, this._cfg.particleSizeScale, 0.5, 3.0),
-      entranceVisual: this._normalizeEntranceVisual(notification?.entranceVisual || this._cfg.entranceVisual),
-      autoDismissMotion: normalizeDismissMotionTrack(notification?.autoDismissMotion || this._cfg.autoDismissMotion, "drift", "autoDismissMotions"),
-      manualDismissMotion: normalizeDismissMotionTrack(notification?.manualDismissMotion || this._cfg.manualDismissMotion, "click-burst", "manualDismissMotions"),
-      physicsPreset: this._normalizePhysicsPreset(notification?.physicsPreset || this._cfg.physicsPreset),
-      toastTransportMode: notification?.toastTransportMode || this._cfg.toastTransportMode,
-      sakuraTheme,
-    };
+    return decorateToastNotification(notification, this._cfg);
   }
 
   _toastThemeColors(theme) {
-    return getToastThemeColors(theme);
+    return toastThemeColors(theme);
   }
 
   _resolveToastColors(notification, themeColors) {
-    const primaryCandidate = themeColors?.primary || notification?.primary || notification?.theme?.primary;
-    const primarySource = themeColors?.primary
-      ? "sakuraTheme.primary"
-      : notification?.primary
-        ? "notification.primary"
-        : notification?.theme?.primary
-          ? "notification.theme.primary"
-          : "fallback.primary";
-    const primary = this._normalizeHexColor(primaryCandidate, "#9b7cff");
-
-    const accentCandidate = themeColors?.accent || notification?.accent || notification?.theme?.accent || primary;
-    const accentSource = themeColors?.accent
-      ? "sakuraTheme.accent"
-      : notification?.accent
-        ? "notification.accent"
-        : notification?.theme?.accent
-          ? "notification.theme.accent"
-          : "primary";
-    const accent = this._normalizeHexColor(accentCandidate, primary);
-
-    return { primary, accent, source: { primary: primarySource, accent: accentSource } };
+    return resolveToastColors(notification, themeColors);
   }
 
   showCustomToast(notification, options = {}) {
@@ -685,17 +691,7 @@ export default class NotificationHubPlugin {
   }
 
   _normalizeHexColor(value, fallback = "#9b7cff") {
-    const text = String(value || "").trim();
-    const direct = text.match(/^#([0-9a-fA-F]{6})$/);
-    if (direct) return `#${direct[1].toLowerCase()}`;
-    const short = text.match(/^#([0-9a-fA-F]{3})$/);
-    if (short) {
-      const [r, g, b] = short[1].toLowerCase().split("");
-      return `#${r}${r}${g}${g}${b}${b}`;
-    }
-    const embedded = text.match(/#([0-9a-fA-F]{6})\b/);
-    if (embedded) return `#${embedded[1].toLowerCase()}`;
-    return fallback;
+    return normalizeHexColor(value, fallback);
   }
 
   _normalizeDisplayMode(config) {
@@ -704,6 +700,22 @@ export default class NotificationHubPlugin {
 
   _normalizeSoundTheme(value) {
     return normalizeSoundTheme(value, "chime");
+  }
+
+  _resolveStatusSoundTheme(isImportant) {
+    return resolveStatusSoundTheme(this._cfg, isImportant);
+  }
+
+  _resolveNotificationSoundTheme(type, importance) {
+    return resolveNotificationSoundTheme(this._cfg, type, importance);
+  }
+
+  _resolveNotificationCustomSoundPath(type) {
+    return resolveNotificationCustomSoundPath(this._cfg, type);
+  }
+
+  _resolveCustomSoundPath(notification) {
+    return resolveCustomSoundPath(this._cfg, notification);
   }
 
   _normalizeToastStyle(value) {
@@ -743,7 +755,7 @@ export default class NotificationHubPlugin {
   }
 
   _parseKeywords(value) {
-    return parseKeywords(value);
+    return parseNotificationKeywords(value);
   }
 
   _configSnapshot(value) {
@@ -765,27 +777,11 @@ export default class NotificationHubPlugin {
   }
 
   _resolveImportance(type, text) {
-    const base = type === "channel" ? "low" : "normal";
-    if (!this._cfg?.enableKeywordImportance) return { level: base, keywords: [] };
-
-    const haystack = String(text || "").toLowerCase();
-    const matched = [];
-    for (const keyword of this._cfg.keywords || []) {
-      const needle = String(keyword || "").trim();
-      if (!needle) continue;
-      if (haystack.includes(needle.toLowerCase())) matched.push(needle);
-    }
-
-    if (matched.length) return { level: "important", keywords: matched };
-    return { level: base, keywords: [] };
+    return resolveImportance(this._cfg, type, text);
   }
 
   _shouldPlaySound(type, importance) {
-    if (this._cfg.notificationSoundTheme === "off") return false;
-    if (importance === "important" || importance === "urgent") return this._cfg.importantNotificationSound !== false;
-    if (type === "conversation") return this._cfg.enableConversationSound !== false;
-    if (type === "channel") return this._cfg.enableChannelSound === true;
-    return false;
+    return shouldPlaySound(this._cfg, type, importance);
   }
 
   _extractSummary(msg) {

@@ -18,14 +18,19 @@ namespace NotificationHubToast
     {
         System.Collections.Generic.List<ToastForm> _toasts = new System.Collections.Generic.List<ToastForm>();
         TcpServer _pipeServer;
+        Thread _serverThread;
         HiddenForm _invoker;
         string[] _payloadPaths;
         readonly bool _serverMode;
+        readonly string _managerToken;
+        readonly int _managerPort;
 
         public ToastManager(string[] payloadPaths)
         {
             _payloadPaths = payloadPaths;
             _serverMode = _payloadPaths == null || _payloadPaths.Length == 0;
+            _managerToken = Environment.GetEnvironmentVariable("NH_TOAST_MANAGER_TOKEN") ?? "";
+            _managerPort = TcpServer.ResolvePortFromEnvironment();
 
             // Defer startup until Application.Run message pump is active
             var startupTimer = new Timer();
@@ -43,9 +48,17 @@ namespace NotificationHubToast
             // Manager mode owns the TCP server. File payload mode must not bind the same port.
             if (_serverMode)
             {
-                _pipeServer = new TcpServer();
+                _pipeServer = new TcpServer(_managerToken, _managerPort);
                 _pipeServer.OnCommand = HandlePipeLine;
-                new Thread(_pipeServer.Run) { IsBackground = true, Name = "PipeServer" }.Start();
+                _serverThread = new Thread(_pipeServer.Run) { IsBackground = true, Name = "PipeServer" };
+                _serverThread.Start();
+                if (!_pipeServer.WaitUntilStarted(1500))
+                {
+                    try { Console.Error.WriteLine("[notification-hub helper] toast manager failed to bind 127.0.0.1:" + _managerPort.ToString(System.Globalization.CultureInfo.InvariantCulture) + ": " + (_pipeServer.StartError ?? "startup timeout")); } catch { }
+                    Environment.ExitCode = 32;
+                    ExitThread();
+                    return;
+                }
             }
 
             foreach (var path in _payloadPaths)
@@ -62,13 +75,26 @@ namespace NotificationHubToast
         void HandlePipeLine(string json, StreamWriter writer)
         {
             var toastId = Payload.Get(json, "id", Guid.NewGuid().ToString());
-            // Queue UI work asynchronously — don't block the TCP client thread.
-            // WinForms serializes BeginInvoke callbacks on the UI thread,
-            // so every toast still receives a stable slot and spring animation.
-            _invoker.BeginInvoke((Action<string>)ProcessPipeCommand, json);
-            // Ack the exact client connection immediately. This keeps burst sends
-            // from queueing behind a single long-lived TCP connection.
-            TcpServer.SendAck(writer, toastId, "queued");
+            try
+            {
+                if (_invoker == null || _invoker.IsDisposed)
+                {
+                    TcpServer.SendError(writer, toastId, "ui invoker unavailable");
+                    return;
+                }
+
+                // Queue UI work asynchronously — don't block the TCP client thread.
+                // WinForms serializes BeginInvoke callbacks on the UI thread,
+                // so every toast still receives a stable slot and spring animation.
+                _invoker.BeginInvoke((Action<string>)ProcessPipeCommand, json);
+                // Ack the exact client connection immediately. This keeps burst sends
+                // from queueing behind a single long-lived TCP connection.
+                TcpServer.SendAck(writer, toastId, "queued");
+            }
+            catch (Exception ex)
+            {
+                TcpServer.SendError(writer, toastId, "ui queue failed: " + ex.Message);
+            }
         }
 
         void ProcessPipeCommand(string json)
@@ -95,16 +121,22 @@ namespace NotificationHubToast
             p.Importance = Payload.Get(json, "importance", "normal");
             p.Sound = Payload.GetBool(json, "sound", false);
             p.SoundTheme = Payload.Get(json, "soundTheme", "chime");
+            p.CustomSoundPath = Payload.Get(json, "customSoundPath", "");
             p.SakuraEnabled = Payload.GetBool(json, "sakuraEnabled", true);
             p.SakuraTheme = Payload.Get(json, "sakuraTheme", "auto");
             p.ButterflyCount = Math.Max(0, Math.Min(240, Payload.GetInt(json, "butterflyCount", 18)));
             p.ParticleCount = Math.Max(0, Math.Min(1200, Payload.GetInt(json, "particleCount", 0)));
+            p.ToastLayout = Payload.Get(json, "toastLayout", "clean").ToLowerInvariant();
+            p.ToastScale = Math.Max(0.7, Math.Min(1.2, Payload.GetDouble(json, "toastScale", 1.0)));
+            p.ToastOffsetX = Math.Max(-1600, Math.Min(1600, Payload.GetInt(json, "toastOffsetX", 0)));
+            p.ToastOffsetY = Math.Max(-1000, Math.Min(1000, Payload.GetInt(json, "toastOffsetY", 0)));
             p.ToastStyle = Payload.Get(json, "toastStyle", "classic");
             p.DismissEffect = Payload.Get(json, "dismissEffect", "fade");
             p.ParticleShape = Payload.Get(json, "particleShape", "sakura");
             p.AutoParticleCountScale = Math.Max(0.2, Math.Min(4.0, Payload.GetDouble(json, "autoParticleCountScale", 1.0)));
             p.ManualParticleCountScale = Math.Max(0.2, Math.Min(4.0, Payload.GetDouble(json, "manualParticleCountScale", 1.0)));
             p.ParticleSizeScale = Math.Max(0.5, Math.Min(3.0, Payload.GetDouble(json, "particleSizeScale", 1.0)));
+            p.ParticleIntervalEffect = Math.Max(0, Math.Min(100, Payload.GetInt(json, "particleIntervalEffect", 0)));
             p.EntranceVisual = Payload.Get(json, "entranceVisual", "classic");
             p.AutoDismissMotion = Payload.NormalizeDismissMotion(Payload.Get(json, "autoDismissMotion", "drift"));
             p.ManualDismissMotion = Payload.NormalizeDismissMotion(Payload.Get(json, "manualDismissMotion", "click-burst"));
@@ -177,6 +209,15 @@ namespace NotificationHubToast
                 _pipeServer.Dispose();
                 _pipeServer = null;
             }
+            if (_serverThread != null)
+            {
+                try
+                {
+                    if (_serverThread.IsAlive) _serverThread.Join(500);
+                }
+                catch { }
+                _serverThread = null;
+            }
 
             if (_toasts != null && _toasts.Count > 0)
             {
@@ -225,21 +266,48 @@ namespace NotificationHubToast
 
     sealed class TcpServer : IDisposable
     {
-        const int Port = 48105;
+        const int DefaultPort = 48105;
+        readonly string _token;
+        readonly int _port;
+        readonly ManualResetEventSlim _started = new ManualResetEventSlim(false);
         System.Net.Sockets.TcpListener _listener;
         volatile bool _stopping = false;
         public Action<string, StreamWriter> OnCommand;
+        public string StartError { get; private set; }
+
+        public TcpServer(string token, int port)
+        {
+            _token = token ?? "";
+            _port = port > 0 ? port : DefaultPort;
+        }
+
+        public static int ResolvePortFromEnvironment()
+        {
+            int parsed;
+            var raw = Environment.GetEnvironmentVariable("NH_TOAST_MANAGER_PORT");
+            if (Int32.TryParse(raw, out parsed) && parsed >= 1024 && parsed <= 65535) return parsed;
+            return DefaultPort;
+        }
+
+        public bool WaitUntilStarted(int timeoutMs)
+        {
+            if (!_started.Wait(timeoutMs)) return false;
+            return String.IsNullOrWhiteSpace(StartError);
+        }
 
         public void Run()
         {
             try
             {
-                _listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, Port);
+                _listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, _port);
                 _listener.Start();
+                _started.Set();
             }
-            catch
+            catch (Exception ex)
             {
-                // Port in use or other bind failure — another manager is already running.
+                StartError = ex.GetType().Name + ": " + ex.Message;
+                try { Console.Error.WriteLine("[notification-hub helper] tcp bind failed 127.0.0.1:" + _port.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " + StartError); } catch { }
+                _started.Set();
                 return;
             }
             while (!_stopping)
@@ -269,8 +337,25 @@ namespace NotificationHubToast
                     string line;
                     while ((line = reader.ReadLine()) != null)
                     {
+                        if (String.IsNullOrWhiteSpace(line)) continue;
+                        var id = Payload.Get(line, "id", "");
+                        var token = Payload.Get(line, "token", "");
+                        if (!String.IsNullOrEmpty(_token) && !String.Equals(token, _token, StringComparison.Ordinal))
+                        {
+                            SendError(writer, id, "unauthorized");
+                            continue;
+                        }
+
+                        var t = Payload.Get(line, "t", "");
+                        if (String.Equals(t, "ping", StringComparison.OrdinalIgnoreCase))
+                        {
+                            SendAck(writer, id, "pong");
+                            continue;
+                        }
+
                         var handler = OnCommand;
                         if (handler != null) handler(line, writer);
+                        else SendError(writer, id, "no command handler");
                     }
                 }
             }
@@ -288,17 +373,24 @@ namespace NotificationHubToast
             }
             catch { }
             _listener = null;
+            try { _started.Dispose(); } catch { }
         }
 
         public static void SendAck(StreamWriter writer, string id, string op)
         {
             if (writer == null) return;
-            try { writer.WriteLine("{ \"t\": \"ack\", \"id\": \"" + JsonEscape(id) + "\", \"op\": \"" + op + "\" }"); } catch { }
+            try { writer.WriteLine("{ \"t\": \"ack\", \"id\": \"" + JsonEscape(id) + "\", \"op\": \"" + JsonEscape(op) + "\", \"ok\": true }"); } catch { }
+        }
+
+        public static void SendError(StreamWriter writer, string id, string error)
+        {
+            if (writer == null) return;
+            try { writer.WriteLine("{ \"t\": \"ack\", \"id\": \"" + JsonEscape(id) + "\", \"op\": \"error\", \"ok\": false, \"error\": \"" + JsonEscape(error) + "\" }"); } catch { }
         }
 
         static string JsonEscape(string s)
         {
-            if (string.IsNullOrEmpty(s)) return s;
+            if (string.IsNullOrEmpty(s)) return "";
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }
@@ -325,209 +417,33 @@ namespace NotificationHubToast
         }
     }
 
-    sealed class Payload
-    {
-        public string Title = "閫氱煡";
-        public string Body = "";
-        public string AgentName = "Assistant";
-        public string Emoji = "馃";
-        public string Type = "conversation";
-        public string Primary = "#9b7cff";
-        public string Accent = "#9b7cff";
-        public string Importance = "normal";
-        public string MatchedKeywords = "";
-        public string SoundTheme = "chime";
-        public bool Sound = false;
-        public int StackIndex = 0;
-        public int StackGap = 8;
-        public string SlotStatePath = "";
-        public string ControlPath = "";
-        public string ToastId = "";
-        public string ClickPath = "";
-        public string ActionType = "";
-        public string ActionTarget = "";
-        public string Source = "";
-        public bool SakuraEnabled = true;
-        public string SakuraTheme = "";
-        public int ButterflyCount = 0;
-        public int ParticleCount = 0;
-        public string ToastStyle = "classic";
-        public string DismissEffect = "fade";
-        public string ParticleShape = "sakura";
-        public double AutoParticleCountScale = 1.0;
-        public double ManualParticleCountScale = 1.0;
-        public double ParticleSizeScale = 1.0;
-        public string EntranceVisual = "classic";
-        public string AutoDismissMotion = "drift";
-        public string ManualDismissMotion = "click-burst";
-        public string PhysicsPreset = "lively";
-
-        public static Payload Load(string path)
-        {
-            var raw = File.ReadAllText(path, System.Text.Encoding.UTF8);
-            var p = new Payload();
-            p.Title = Get(raw, "title", p.Title);
-            p.Body = Get(raw, "body", p.Body);
-            p.AgentName = Get(raw, "agentName", p.AgentName);
-            p.Emoji = Get(raw, "emoji", p.Emoji);
-            p.Type = Get(raw, "type", p.Type);
-            p.Primary = Get(raw, "primary", p.Primary);
-            p.Accent = Get(raw, "accent", p.Accent);
-            p.Importance = Get(raw, "importance", p.Importance).ToLowerInvariant();
-            p.MatchedKeywords = Get(raw, "matchedKeywords", p.MatchedKeywords);
-            p.SoundTheme = Get(raw, "soundTheme", p.SoundTheme).ToLowerInvariant();
-            p.Sound = GetBool(raw, "sound", p.Sound);
-            p.StackIndex = Math.Max(0, Math.Min(12, GetInt(raw, "stackIndex", p.StackIndex)));
-            p.StackGap = Math.Max(0, Math.Min(40, GetInt(raw, "stackGap", p.StackGap)));
-            p.ControlPath = Get(raw, "controlPath", p.ControlPath);
-            p.SlotStatePath = Get(raw, "slotStatePath", p.SlotStatePath);
-            p.SlotStatePath = Get(raw, "slotStatePath", p.SlotStatePath);
-            p.ToastId = Get(raw, "toastId", p.ToastId);
-            p.ClickPath = Get(raw, "clickPath", p.ClickPath);
-            p.ActionType = Get(raw, "actionType", p.ActionType);
-            p.ActionTarget = Get(raw, "actionTarget", p.ActionTarget);
-            p.Source = Get(raw, "source", p.Source);
-            p.SakuraEnabled = GetBool(raw, "sakuraEnabled", p.SakuraEnabled);
-            p.SakuraTheme = Get(raw, "sakuraTheme", p.SakuraTheme).ToLowerInvariant();
-            p.ButterflyCount = Math.Max(0, Math.Min(240, GetInt(raw, "butterflyCount", p.ButterflyCount)));
-            p.ParticleCount = Math.Max(0, Math.Min(1200, GetInt(raw, "particleCount", p.ParticleCount)));
-            p.ToastStyle = Get(raw, "toastStyle", p.ToastStyle).ToLowerInvariant();
-            p.DismissEffect = Get(raw, "dismissEffect", p.DismissEffect).ToLowerInvariant();
-            p.ParticleShape = Get(raw, "particleShape", p.ParticleShape).ToLowerInvariant();
-            p.AutoParticleCountScale = Math.Max(0.2, Math.Min(4.0, GetDouble(raw, "autoParticleCountScale", p.AutoParticleCountScale)));
-            p.ManualParticleCountScale = Math.Max(0.2, Math.Min(4.0, GetDouble(raw, "manualParticleCountScale", p.ManualParticleCountScale)));
-            p.ParticleSizeScale = Math.Max(0.5, Math.Min(3.0, GetDouble(raw, "particleSizeScale", p.ParticleSizeScale)));
-            p.EntranceVisual = Get(raw, "entranceVisual", p.EntranceVisual).ToLowerInvariant();
-            p.AutoDismissMotion = NormalizeDismissMotion(Get(raw, "autoDismissMotion", p.AutoDismissMotion));
-            p.ManualDismissMotion = NormalizeDismissMotion(Get(raw, "manualDismissMotion", p.ManualDismissMotion));
-            p.PhysicsPreset = Get(raw, "physicsPreset", p.PhysicsPreset).ToLowerInvariant();
-            return p;
-        }
-
-        public static string Get(string json, string key, string fallback)
-        {
-            var m = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
-            if (!m.Success) return fallback;
-            var value = DecodeJsonString(m.Groups[1].Value);
-            return String.IsNullOrWhiteSpace(value) ? fallback : value;
-        }
-
-        static string DecodeJsonString(string value)
-        {
-            if (String.IsNullOrEmpty(value)) return value;
-            var sb = new System.Text.StringBuilder(value.Length);
-            for (int i = 0; i < value.Length; i++)
-            {
-                var ch = value[i];
-                if (ch != '\\' || i + 1 >= value.Length)
-                {
-                    sb.Append(ch);
-                    continue;
-                }
-
-                var next = value[++i];
-                switch (next)
-                {
-                    case '\\': sb.Append('\\'); break;
-                    case '"': sb.Append('"'); break;
-                    case 'n': sb.Append('\n'); break;
-                    case 'r': sb.Append('\r'); break;
-                    case 't': sb.Append('\t'); break;
-                    case 'b': sb.Append('\b'); break;
-                    case 'f': sb.Append('\f'); break;
-                    default:
-                        sb.Append(next);
-                        break;
-                }
-            }
-            return sb.ToString();
-        }
-
-        public static bool GetBool(string json, string key, bool fallback)
-        {
-            var m = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*(true|false)", RegexOptions.IgnoreCase);
-            if (!m.Success) return fallback;
-            return String.Equals(m.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        public static long GetLong(string json, string key, long fallback)
-        {
-            var m = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*(-?\\d+)");
-            if (!m.Success) return fallback;
-            return long.Parse(m.Groups[1].Value);
-        }
-
-        public static int GetInt(string json, string key, int fallback)
-        {
-            var m = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*(-?\\d+)");
-            if (!m.Success) return fallback;
-            int value;
-            return Int32.TryParse(m.Groups[1].Value, out value) ? value : fallback;
-        }
-
-        public static double GetDouble(string json, string key, double fallback)
-        {
-            var m = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)");
-            if (!m.Success) return fallback;
-            double value;
-            return Double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value) ? value : fallback;
-        }
-
-        public static string NormalizeDismissMotion(string motion)
-        {
-            var m = (motion ?? "drift").Trim().ToLowerInvariant();
-            switch (m)
-            {
-                case "burst":
-                case "explosion":
-                    return "circle-burst";
-                case "click":
-                    return "click-burst";
-                case "float":
-                    return "drift";
-                case "drift":
-                case "circle-burst":
-                case "rect-burst":
-                case "click-burst":
-                case "x-burst":
-                case "vortex":
-                case "ribbon-flow":
-                case "gravity-fall":
-                case "orbit-decay":
-                case "bubble-rise":
-                case "windmill-gust":
-                case "shatter-lines":
-                case "pixel-rain":
-                case "magnet-snap":
-                    return m;
-                default:
-                    return "drift";
-            }
-        }
-    }
-
     sealed class ToastForm : Form
     {
         readonly Payload payload;
         public string ToastId { get { return payload.ToastId; } }
         enum ToastPhase { Entering, Alive, Exiting }
 
-        const int CardWidth = 390;
-        const int CardHeight = 118;
-        const int CanvasPadLeft = 140;
-        const int CanvasPadTop = 112;
-        const int CanvasPadRight = 44;
-        const int CanvasPadBottom = 44;
+        // Keep WinForms autoscaling disabled for smooth animation, then scale the
+        // toast explicitly so it retains the old large visual presence without
+        // reintroducing DPI/layout jank.
+        const int CardWidth = 500;
+        const int CardHeight = 152;
+        const int CanvasPadLeft = 180;
+        const int CanvasPadTop = 144;
+        const int CanvasPadRight = 56;
+        const int CanvasPadBottom = 56;
 
-        static readonly Font EmojiFont = new Font("Segoe UI Emoji", 22f);
-        static readonly Font TitleFont = new Font("Microsoft YaHei UI", 10.5f, FontStyle.Bold);
-        static readonly Font BodyFont = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
-        static readonly Font SmallFont = new Font("Microsoft YaHei UI", 7.6f, FontStyle.Regular);
+        static readonly Font EmojiFont = new Font("Segoe UI Emoji", 18f);
+        static readonly Font MiniEmojiFont = new Font("Segoe UI Emoji", 13.5f);
+        static readonly Font TitleFont = new Font("Microsoft YaHei UI", 10.2f, FontStyle.Bold);
+        static readonly Font BodyFont = new Font("Microsoft YaHei UI", 8.8f, FontStyle.Regular);
+        static readonly Font SmallFont = new Font("Microsoft YaHei UI", 7.4f, FontStyle.Regular);
         static int AutoDismissStaggerCounter = 0;
         static readonly int[] AutoDismissStaggerMs = new int[] { 0, 110, 220, 330, 440, 550, 660, 770, 880, 990, 1100, 1210 };
-        static readonly Font NameFont = new Font("Microsoft YaHei UI", 8.8f, FontStyle.Bold);
-        static readonly Font TagFont = new Font("Microsoft YaHei UI", 7.6f, FontStyle.Bold);
-        static readonly Font CollapsedFont = new Font("Microsoft YaHei UI", 8.6f, FontStyle.Bold);
+        static readonly Font NameFont = new Font("Microsoft YaHei UI", 7.8f, FontStyle.Bold);
+        static readonly Font TagFont = new Font("Microsoft YaHei UI", 7.2f, FontStyle.Bold);
+        static readonly Font CollapsedFont = new Font("Microsoft YaHei UI", 8.4f, FontStyle.Bold);
+        static readonly bool ToastPerfEnabled = IsToastPerfEnabled();
 
         readonly Timer lifeTimer = new Timer();
         readonly Timer animTimer = new Timer();
@@ -546,14 +462,24 @@ namespace NotificationHubToast
         double currentY;
         double stackVelocity = 0.0;
         int lastAppliedY = Int32.MinValue;
+        Rectangle toastWorkArea = Rectangle.Empty;
         
         Form _dismissOverlay = null;
+        string _toastLayout = "clean";
+        double _toastScale = 1.0;
+        int _toastOffsetX = 0;
+        int _toastOffsetY = 0;
+        int _designCanvasWidth = CanvasPadLeft + CardWidth + CanvasPadRight;
+        int _designCanvasHeight = CanvasPadTop + CardHeight + CanvasPadBottom;
+        int _scaledCanvasWidth = CanvasPadLeft + CardWidth + CanvasPadRight;
+        int _scaledCanvasHeight = CanvasPadTop + CardHeight + CanvasPadBottom;
         string _toastStyle = "classic";
         string _dismissEffect = "fade";
         string _particleShape = "sakura";
         double _autoParticleCountScale = 1.0;
         double _manualParticleCountScale = 1.0;
         double _particleSizeScale = 1.0;
+        int _particleIntervalEffect = 0;
         string _entranceVisual = "classic";
         double _entranceProgress = 0.0;
         string _autoDismissMotion = "drift";
@@ -569,6 +495,14 @@ namespace NotificationHubToast
         double enterOvershoot = 1.70158;
         int exitSlidePx = 5;
         Point lastClickPoint = Point.Empty;
+        Bitmap _cardCacheBitmap = null;
+        int _perfPaintCount = 0;
+        long _perfMaxPaintTicks = 0;
+        int _perfAnimTicks = 0;
+        int _perfStackTicks = 0;
+        long _perfSoundQueueTicks = 0;
+        long _perfCardRenderTicks = 0;
+        bool _perfReported = false;
 
         Color ccPrimary, ccAccent, ccBgTop, ccBgBottom, ccBorderColor, ccSoftAccent;
         int ccGlowAlpha, ccSecondGlowAlpha, ccBorderAlpha, ccHighlightAlpha;
@@ -822,7 +756,13 @@ namespace NotificationHubToast
         public ToastForm(Payload payload)
         {
             this.payload = payload;
-            Width = CanvasPadLeft + CardWidth + CanvasPadRight;
+            _toastScale = Math.Max(0.7, Math.Min(1.2, payload.ToastScale));
+            _toastOffsetX = Math.Max(-1600, Math.Min(1600, payload.ToastOffsetX));
+            _toastOffsetY = Math.Max(-1000, Math.Min(1000, payload.ToastOffsetY));
+            _designCanvasWidth = CanvasPadLeft + CardWidth + CanvasPadRight;
+            _designCanvasHeight = CanvasPadTop + CardHeight + CanvasPadBottom;
+            _scaledCanvasWidth = Math.Max(1, (int)Math.Round(_designCanvasWidth * _toastScale));
+            _scaledCanvasHeight = Math.Max(1, (int)Math.Round(_designCanvasHeight * _toastScale));
             cardRect = new Rectangle(CanvasPadLeft + 8, CanvasPadTop + 8, CardWidth - 16, CardHeight - 16);
             ccPrimary = ParseColor(payload.Primary, Color.FromArgb(155, 124, 255));
             ccAccent = ParseColor(payload.Accent, ccPrimary);
@@ -843,12 +783,18 @@ namespace NotificationHubToast
             ccTagPenA = 28;
             ccTagBrushA = ccIsImportant ? 230 : 178;
 
-            var work = Screen.PrimaryScreen.WorkingArea;
-            Height = CanvasPadTop + CardHeight + CanvasPadBottom;
+            AutoScaleMode = AutoScaleMode.None;
+            toastWorkArea = ResolveToastWorkingArea();
+            var work = toastWorkArea;
+            var canvasWidth = _scaledCanvasWidth;
+            var canvasHeight = _scaledCanvasHeight;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
+            ClientSize = new Size(canvasWidth, canvasHeight);
+            MinimumSize = Size.Empty;
+            MaximumSize = Size.Empty;
             // Avoid magenta transparency-key bleeding on anti-aliased rounded edges.
             var transparentKey = Color.FromArgb(1, 2, 3);
             BackColor = transparentKey;
@@ -856,18 +802,21 @@ namespace NotificationHubToast
             DoubleBuffered = true;
             Opacity = 0;
 
-                        finalX = work.Right - CardWidth - 22 - CanvasPadLeft;
-            startX = finalX + 34;
-            baseY = work.Bottom - CardHeight - 26 - CanvasPadTop;
+            // Let user offsets move the toast freely, including beyond the screen working area.
+            finalX = work.Right - canvasWidth - 44 + _toastOffsetX;
+            startX = finalX + (int)Math.Round(34 * _toastScale);
+            baseY = work.Bottom - canvasHeight - 8 + _toastOffsetY;
             targetY = ComputeStackY(payload.StackIndex);
             currentY = targetY;
-            Location = new Point(startX, targetY);
+            Bounds = new Rectangle(startX, targetY, canvasWidth, canvasHeight);
+            _toastLayout = NormalizeToastLayout(payload.ToastLayout);
             _toastStyle = payload.ToastStyle;
             _dismissEffect = payload.DismissEffect;
             _particleShape = payload.ParticleShape;
             _autoParticleCountScale = Math.Max(0.2, Math.Min(4.0, payload.AutoParticleCountScale));
             _manualParticleCountScale = Math.Max(0.2, Math.Min(4.0, payload.ManualParticleCountScale));
             _particleSizeScale = Math.Max(0.5, Math.Min(3.0, payload.ParticleSizeScale));
+            _particleIntervalEffect = Math.Max(0, Math.Min(100, payload.ParticleIntervalEffect));
             _entranceVisual = EntranceVisualRegistry.Normalize(payload.EntranceVisual);
             _entranceProgress = 0.0;
             _autoDismissMotion = Payload.NormalizeDismissMotion(payload.AutoDismissMotion);
@@ -935,6 +884,7 @@ namespace NotificationHubToast
             animTimer.Stop();
             stackTimer.Stop();
             DisposeDismissOverlay();
+            ReportPerfDiagnostics("closed");
             base.OnFormClosed(e);
         }
 
@@ -948,7 +898,9 @@ namespace NotificationHubToast
                 lifeTimer.Dispose();
                 animTimer.Dispose();
                 stackTimer.Dispose();
+                DisposeCardCache();
                 DisposeDismissOverlay();
+                ReportPerfDiagnostics("dispose");
             }
             base.Dispose(disposing);
         }
@@ -965,6 +917,65 @@ namespace NotificationHubToast
                     overlay.Close();
                     overlay.Dispose();
                 }
+            }
+            catch { }
+        }
+
+        void DisposeCardCache()
+        {
+            var bitmap = _cardCacheBitmap;
+            _cardCacheBitmap = null;
+            if (bitmap == null) return;
+            try { bitmap.Dispose(); } catch { }
+        }
+
+        static bool IsToastPerfEnabled()
+        {
+            try
+            {
+                var value = Environment.GetEnvironmentVariable("NH_TOAST_PERF");
+                if (String.IsNullOrWhiteSpace(value)) return false;
+                value = value.Trim();
+                return value == "1"
+                    || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("on", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        static double PerfTicksToMs(long ticks)
+        {
+            if (ticks <= 0) return 0.0;
+            return ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        }
+
+        void ReportPerfDiagnostics(string reason)
+        {
+            if (!ToastPerfEnabled || _perfReported) return;
+            _perfReported = true;
+            var line = "[NH_TOAST_PERF] toastId=" + payload.ToastId
+                + " reason=" + reason
+                + " style=" + (_toastStyle ?? "classic")
+                + " entrance=" + (_entranceVisual ?? "classic")
+                + " paints=" + _perfPaintCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + " maxPaintMs=" + PerfTicksToMs(_perfMaxPaintTicks).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
+                + " cardRenderMs=" + PerfTicksToMs(_perfCardRenderTicks).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
+                + " animTicks=" + _perfAnimTicks.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + " stackTicks=" + _perfStackTicks.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + " soundQueueMs=" + PerfTicksToMs(_perfSoundQueueTicks).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            try { Console.Error.WriteLine(line); } catch { }
+            try
+            {
+                var perfFile = Environment.GetEnvironmentVariable("NH_TOAST_PERF_FILE");
+                if (String.IsNullOrWhiteSpace(perfFile)) return;
+                perfFile = Environment.ExpandEnvironmentVariables(perfFile.Trim().Trim('"'));
+                var dir = Path.GetDirectoryName(perfFile);
+                if (!String.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+                File.AppendAllText(
+                    perfFile,
+                    DateTime.Now.ToString("o", System.Globalization.CultureInfo.InvariantCulture) + " " + line + Environment.NewLine,
+                    Encoding.UTF8);
             }
             catch { }
         }
@@ -986,13 +997,22 @@ namespace NotificationHubToast
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            if (payload.Sound)
-            {
-                PlayNotificationSound(payload.SoundTheme);
-            }
-            stackTimer.Start();
+            var canvasWidth = _scaledCanvasWidth;
+            var canvasHeight = _scaledCanvasHeight;
+            if (ClientSize.Width != canvasWidth || ClientSize.Height != canvasHeight)
+                ClientSize = new Size(canvasWidth, canvasHeight);
+            currentY = targetY;
+            Bounds = new Rectangle(startX, targetY, canvasWidth, canvasHeight);
+            if (!IsStackSettled()) EnsureStackTimerRunning();
             animTimer.Start();
             lifeTimer.Start();
+            if (payload.Sound)
+            {
+                var soundQueueStart = ToastPerfEnabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+                NotificationSoundPlayer.Queue(payload.SoundTheme, payload.CustomSoundPath);
+                if (ToastPerfEnabled && soundQueueStart > 0)
+                    _perfSoundQueueTicks = System.Diagnostics.Stopwatch.GetTimestamp() - soundQueueStart;
+            }
         }
 
         protected override void OnMouseEnter(EventArgs e)
@@ -1031,9 +1051,28 @@ namespace NotificationHubToast
                 lifeTimer.Start();
         }
 
+        Rectangle ResolveToastWorkingArea()
+        {
+            try
+            {
+                var screen = Screen.FromPoint(Cursor.Position);
+                if (screen != null) return screen.WorkingArea;
+            }
+            catch { }
+            try
+            {
+                var screen = Screen.PrimaryScreen;
+                if (screen != null) return screen.WorkingArea;
+            }
+            catch { }
+            return SystemInformation.WorkingArea;
+        }
+
         int ComputeStackY(int index)
         {
-            return baseY - Math.Max(0, index) * (CardHeight + payload.StackGap);
+            var scaledGap = Math.Max(0, (int)Math.Round(payload.StackGap * _toastScale));
+            var visualCardHeight = Math.Max(1, (int)Math.Round(cardRect.Height * _toastScale));
+            return baseY - Math.Max(0, index) * (visualCardHeight + scaledGap);
         }
 
         public void SetTargetSlot(int slot)
@@ -1047,6 +1086,7 @@ namespace NotificationHubToast
             {
                 // Servo-like preset: discard inertia and glide directly to the new slot.
                 stackVelocity = 0.0;
+                if (!IsStackSettled()) EnsureStackTimerRunning();
                 return;
             }
 
@@ -1054,6 +1094,8 @@ namespace NotificationHubToast
             // Add a small impulse toward the new target so stack reflow visibly overshoots.
             if (Math.Abs(targetJump) > 0.1)
                 stackVelocity += targetJump * stackTargetImpulse;
+
+            if (!IsStackSettled()) EnsureStackTimerRunning();
         }
 
         void ApplyPhysicsPreset(string preset)
@@ -1110,8 +1152,20 @@ namespace NotificationHubToast
             }
         }
 
+        bool IsStackSettled()
+        {
+            return Math.Abs(stackVelocity) < stackSettleVelocity
+                && Math.Abs(targetY - currentY) < stackSettleDistance;
+        }
+
+        void EnsureStackTimerRunning()
+        {
+            if (!stackTimer.Enabled) stackTimer.Start();
+        }
+
         void UpdateStackMotion()
         {
+            if (ToastPerfEnabled) _perfStackTicks++;
             var delta = targetY - currentY;
             var acceleration = delta * stackSpringStiffness - stackVelocity * stackDamping;
             stackVelocity += acceleration;
@@ -1125,6 +1179,7 @@ namespace NotificationHubToast
                 currentY += stackVelocity;
             }
             ApplyWindowY((int)Math.Round(currentY));
+            if (IsStackSettled()) stackTimer.Stop();
         }
 
         void ApplyWindowY(int y)
@@ -1145,6 +1200,7 @@ namespace NotificationHubToast
             if (next == bodyScrollOffset) return true;
             bodyScrollOffset = next;
             // Full repaint avoids transparent-window partial invalidation artifacts.
+            DisposeCardCache();
             Invalidate();
             return true;
         }
@@ -1180,7 +1236,11 @@ namespace NotificationHubToast
             var clickOriginMode = clicked && motion == "click-burst";
 
             // Convert toast-local card/click origin to screen coordinates for the full-screen overlay.
-            var sourceRect = new Rectangle(Left + cardRect.Left, Top + cardRect.Top, cardRect.Width, cardRect.Height);
+            var sourceRect = new Rectangle(
+                Left + (int)Math.Round(cardRect.Left * _toastScale),
+                Top + (int)Math.Round(cardRect.Top * _toastScale),
+                Math.Max(1, (int)Math.Round(cardRect.Width * _toastScale)),
+                Math.Max(1, (int)Math.Round(cardRect.Height * _toastScale)));
             var origin = clickOriginMode && lastClickPoint != Point.Empty
                 ? new Point(Left + lastClickPoint.X, Top + lastClickPoint.Y)
                 : new Point(sourceRect.Left + sourceRect.Width / 2, sourceRect.Top + sourceRect.Height / 2);
@@ -1193,7 +1253,7 @@ namespace NotificationHubToast
             var countScale = clicked ? _manualParticleCountScale : _autoParticleCountScale;
 
             ParticleOverlayHub.Emit(shape, motion, clicked,
-                GetParticlePalette(payload.Importance, payload.AgentName, payload.SakuraTheme, shape, payload.Primary, payload.Accent), sourceRect, origin, dirX, dirY, clickOriginMode, payload.ParticleCount, countScale, _particleSizeScale);
+                GetParticlePalette(payload.Importance, payload.AgentName, payload.SakuraTheme, shape, payload.Primary, payload.Accent), sourceRect, origin, dirX, dirY, clickOriginMode, payload.ParticleCount, countScale, _particleSizeScale * _toastScale, _particleIntervalEffect);
             animTimer.Start();
         }
 
@@ -1238,6 +1298,7 @@ namespace NotificationHubToast
 
         void Animate(object sender, EventArgs e)
         {
+            if (ToastPerfEnabled) _perfAnimTicks++;
             tick++;
             if (phase == ToastPhase.Entering)
             {
@@ -1249,11 +1310,13 @@ namespace NotificationHubToast
 
                 Opacity = opacity;
                 Left = finalX + (int)Math.Round(travel * (1.0 - xEase));
+                Top = (int)Math.Round(currentY);
                 if (p >= 1.0)
                 {
                     _entranceProgress = 1.0;
                     Opacity = 1;
                     Left = finalX;
+                    Top = targetY;
                     phase = ToastPhase.Alive;
                     animTimer.Stop();
                 }
@@ -1271,6 +1334,7 @@ namespace NotificationHubToast
                 var toastFade = Math.Min(1.0, p / 0.72);
                 Opacity = Math.Max(0.0, 1.0 - EaseOutCubic(toastFade));
                 Left = finalX + (int)Math.Round(exitSlidePx * eased);
+                Top = (int)Math.Round(currentY);
 
                 // Overlay is full-screen; no location sync needed.
                 Invalidate();
@@ -1291,83 +1355,6 @@ namespace NotificationHubToast
             return 1 - Math.Pow(1 - t, 3);
         }
 
-        struct EntranceFrame
-        {
-            public double XEase;
-            public int YOffset;
-            public double Opacity;
-
-            public EntranceFrame(double xEase, int yOffset, double opacity)
-            {
-                XEase = xEase;
-                YOffset = yOffset;
-                Opacity = opacity;
-            }
-        }
-
-        static class EntranceMotionRegistry
-        {
-            public static string Normalize(string motion)
-            {
-                var m = (motion ?? "spring").Trim().ToLowerInvariant();
-                if (m == "magnet" || m == "paper" || m == "spring") return m;
-                return "spring";
-            }
-
-            public static EntranceFrame Apply(string motion, double progress, double overshoot)
-            {
-                var p = Clamp01(progress);
-                var m = Normalize(motion);
-
-                if (m == "magnet")
-                {
-                    var slowApproach = 0.42 * EaseOutCubic(Math.Min(1.0, p / 0.58));
-                    var snapProgress = Math.Max(0.0, (p - 0.42) / 0.58);
-                    var snap = 0.58 * (1.0 - Math.Pow(1.0 - snapProgress, 5.5));
-                    return new EntranceFrame(
-                        Math.Min(1.0, slowApproach + snap),
-                        0,
-                        Math.Min(1.0, p * 1.95)
-                    );
-                }
-
-                if (m == "paper")
-                {
-                    var ease = 1.0 - Math.Pow(1.0 - p, 2.15);
-                    return new EntranceFrame(
-                        ease,
-                        0,
-                        Math.Min(1.0, p * 1.18)
-                    );
-                }
-
-                return new EntranceFrame(
-                    EaseOutBack(p, overshoot),
-                    0,
-                    Math.Min(1.0, p * 1.55)
-                );
-            }
-
-            static double Clamp01(double t)
-            {
-                return Math.Max(0, Math.Min(1, t));
-            }
-
-            static double EaseOutCubic(double t)
-            {
-                t = Clamp01(t);
-                return 1 - Math.Pow(1 - t, 3);
-            }
-
-            static double EaseOutBack(double t, double overshoot)
-            {
-                t = Clamp01(t);
-                var c1 = overshoot;
-                var c3 = c1 + 1;
-                return 1 + c3 * Math.Pow(t - 1, 3) + c1 * Math.Pow(t - 1, 2);
-            }
-        }
-
         static double EaseOutBack(double t, double overshoot)
         {
             t = Math.Max(0, Math.Min(1, t));
@@ -1377,10 +1364,74 @@ namespace NotificationHubToast
         }
 
 
-protected override void OnPaint(PaintEventArgs e)
+        protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
+            var paintStart = ToastPerfEnabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
             var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            var cardCache = EnsureCardCache();
+            if (cardCache != null)
+            {
+                g.DrawImageUnscaled(cardCache, 0, 0);
+            }
+            else
+            {
+                var fallbackState = g.Save();
+                g.ScaleTransform((float)_toastScale, (float)_toastScale);
+                RenderStaticCard(g);
+                g.Restore(fallbackState);
+            }
+
+            // Foreground entrance layer remains dynamic; the cached layer only holds the static card body.
+            var entranceState = g.Save();
+            g.ScaleTransform((float)_toastScale, (float)_toastScale);
+            EntranceVisualRegistry.Apply(g, _entranceVisual, _entranceProgress, cardRect, ccPrimary, ccAccent, ccIsImportant);
+            g.Restore(entranceState);
+
+            if (ToastPerfEnabled && paintStart > 0)
+            {
+                var elapsed = System.Diagnostics.Stopwatch.GetTimestamp() - paintStart;
+                _perfPaintCount++;
+                if (elapsed > _perfMaxPaintTicks) _perfMaxPaintTicks = elapsed;
+            }
+        }
+
+        Bitmap EnsureCardCache()
+        {
+            if (_cardCacheBitmap != null) return _cardCacheBitmap;
+
+            var renderStart = ToastPerfEnabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+            Bitmap bitmap = null;
+            Graphics cacheGraphics = null;
+            try
+            {
+                bitmap = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb);
+                cacheGraphics = Graphics.FromImage(bitmap);
+                cacheGraphics.Clear(BackColor);
+                cacheGraphics.SmoothingMode = SmoothingMode.AntiAlias;
+                cacheGraphics.ScaleTransform((float)_toastScale, (float)_toastScale);
+                RenderStaticCard(cacheGraphics);
+                _cardCacheBitmap = bitmap;
+                bitmap = null;
+                return _cardCacheBitmap;
+            }
+            catch
+            {
+                if (bitmap != null) bitmap.Dispose();
+                return null;
+            }
+            finally
+            {
+                if (cacheGraphics != null) cacheGraphics.Dispose();
+                if (ToastPerfEnabled && renderStart > 0)
+                    _perfCardRenderTicks += System.Diagnostics.Stopwatch.GetTimestamp() - renderStart;
+            }
+        }
+
+        void RenderStaticCard(Graphics g)
+        {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var style = (_toastStyle ?? "classic").ToLowerInvariant();
 
@@ -1518,9 +1569,9 @@ protected override void OnPaint(PaintEventArgs e)
                         var state = g.Save();
                         g.SetClip(path);
                         using (var glow = new SolidBrush(Color.FromArgb(ccGlowAlpha, ccPrimary)))
-                            g.FillEllipse(glow, Width - 182, -74, 220, 205);
+                            g.FillEllipse(glow, _designCanvasWidth - 182, -74, 220, 205);
                         using (var glow2 = new SolidBrush(Color.FromArgb(ccSecondGlowAlpha, ccAccent)))
-                            g.FillEllipse(glow2, -70, Height - 90, 198, 132);
+                            g.FillEllipse(glow2, -70, _designCanvasHeight - 90, 198, 132);
                         using (var highlightPath = RoundRect(new Rectangle(cardRect.X + 10, cardRect.Bottom - 18, cardRect.Width - 20, ccIsImportant ? 7 : 5), 6))
                         using (var highlight = new LinearGradientBrush(new Rectangle(cardRect.X + 10, cardRect.Bottom - 18, cardRect.Width - 20, ccIsImportant ? 7 : 5), Color.FromArgb(ccHighlightAlpha, ccSoftAccent), Color.FromArgb(0, ccSoftAccent), 0f))
                             g.FillPath(highlight, highlightPath);
@@ -1533,30 +1584,124 @@ protected override void OnPaint(PaintEventArgs e)
                 }
             }
 
-            // ── Avatar ──
-            var avatarRect = new Rectangle(cardRect.X + 14, cardRect.Y + 22, 46, 46);
-            var avatarR = (style == "tech" || style == "obsidian") ? 8 : 16;
+            RenderCardContent(g, style);
+
+        }
+
+        void RenderCardContent(Graphics g, string style)
+        {
+            var layout = NormalizeToastLayout(_toastLayout);
+            var titleColor = style == "paper" ? Color.FromArgb(84, 58, 52) : ((style == "tech" || style == "obsidian") ? Color.FromArgb(236, 226, 190) : Color.FromArgb(247, 248, 255));
+            var bodyColor = style == "paper" ? Color.FromArgb(146, 104, 96) : ((style == "tech" || style == "obsidian") ? Color.FromArgb(190, 202, 214) : Color.FromArgb(184, 247, 248, 255));
+            var metaColor = style == "paper" ? Color.FromArgb(128, 100, 94) : Color.FromArgb(150, 228, 234, 244);
+            var tag = ccIsImportant ? "\u91CD\u8981" : (payload.Type == "channel" ? "\u9891\u9053" : (payload.Type == "status" ? "\u72B6\u6001" : "\u5BF9\u8BDD"));
+
+            if (layout == "hero")
+            {
+                var avatarRect = new Rectangle(cardRect.X + 18, cardRect.Y + 20, 42, 42);
+                var tagRect = new Rectangle(cardRect.Right - 72, cardRect.Y + 14, 54, 22);
+                var textX = avatarRect.Right + 14;
+                DrawAvatar(g, style, avatarRect, 15);
+                DrawTypeTag(g, style, tag, tagRect);
+                DrawNamePill(g, style, new Rectangle(textX, cardRect.Y + 16, Math.Max(130, tagRect.Left - textX - 12), 22));
+                DrawText(g, payload.Title, TitleFont, titleColor, new Rectangle(textX, cardRect.Y + 43, cardRect.Right - textX - 22, 24));
+                DrawScrollableBody(g, payload.Body, BodyFont, bodyColor, new Rectangle(textX, cardRect.Y + 69, cardRect.Right - textX - 24, cardRect.Bottom - cardRect.Y - 88), ccSoftAccent);
+                DrawMatchedKeywords(g, style, new Rectangle(textX, cardRect.Bottom - 24, cardRect.Right - textX - 22, 18));
+                return;
+            }
+
+            if (layout == "clean")
+            {
+                var tagRect = new Rectangle(cardRect.Right - 72, cardRect.Y + 14, 54, 22);
+                var iconRect = new Rectangle(cardRect.X + 18, cardRect.Y + 15, 24, 24);
+                using (var iconBrush = new SolidBrush(Color.FromArgb(230, 255, 255, 255)))
+                    DrawCentered(g, payload.Emoji, MiniEmojiFont, iconBrush, iconRect);
+                DrawTypeTag(g, style, tag, tagRect);
+                var textX = cardRect.X + 48;
+                DrawText(g, payload.Title, TitleFont, titleColor, new Rectangle(textX, cardRect.Y + 14, tagRect.Left - textX - 10, 24));
+                DrawScrollableBody(g, payload.Body, BodyFont, bodyColor, new Rectangle(cardRect.X + 20, cardRect.Y + 44, cardRect.Width - 40, 54), ccSoftAccent);
+                DrawNamePill(g, style, new Rectangle(cardRect.X + 20, cardRect.Bottom - 31, 154, 22));
+                DrawSourceText(g, payload.Source, SmallFont, metaColor, new Rectangle(cardRect.X + 188, cardRect.Bottom - 28, cardRect.Width - 210, 18));
+                DrawMatchedKeywords(g, style, new Rectangle(cardRect.X + 188, cardRect.Bottom - 28, cardRect.Width - 210, 18));
+                return;
+            }
+
+            if (layout == "headline")
+            {
+                var tagRect = new Rectangle(cardRect.Right - 72, cardRect.Y + 16, 54, 22);
+                DrawTypeTag(g, style, tag, tagRect);
+                using (var bar = new SolidBrush(Color.FromArgb(210, ccPrimary)))
+                    g.FillRectangle(bar, cardRect.X + 20, cardRect.Y + 18, 4, 52);
+                using (var iconBrush = new SolidBrush(Color.FromArgb(225, 255, 255, 255)))
+                    DrawCentered(g, payload.Emoji, MiniEmojiFont, iconBrush, new Rectangle(cardRect.X + 30, cardRect.Y + 15, 24, 24));
+                DrawText(g, payload.Title, TitleFont, titleColor, new Rectangle(cardRect.X + 62, cardRect.Y + 14, tagRect.Left - cardRect.X - 74, 25));
+                DrawScrollableBody(g, payload.Body, BodyFont, bodyColor, new Rectangle(cardRect.X + 62, cardRect.Y + 43, cardRect.Width - 86, 52), ccSoftAccent);
+                DrawNamePill(g, style, new Rectangle(cardRect.X + 62, cardRect.Bottom - 31, 146, 22));
+                DrawSourceText(g, payload.Source, SmallFont, metaColor, new Rectangle(cardRect.X + 220, cardRect.Bottom - 28, cardRect.Width - 242, 18));
+                DrawMatchedKeywords(g, style, new Rectangle(cardRect.X + 220, cardRect.Bottom - 28, cardRect.Width - 242, 18));
+                return;
+            }
+
+            if (layout == "dialogue")
+            {
+                var avatarRect = new Rectangle(cardRect.X + 18, cardRect.Y + 18, 34, 34);
+                var tagRect = new Rectangle(cardRect.Right - 72, cardRect.Y + 14, 54, 22);
+                DrawAvatar(g, style, avatarRect, 13);
+                DrawNamePill(g, style, new Rectangle(avatarRect.Right + 12, cardRect.Y + 16, Math.Max(136, tagRect.Left - avatarRect.Right - 24), 22));
+                DrawTypeTag(g, style, tag, tagRect);
+                DrawText(g, payload.Title, TitleFont, titleColor, new Rectangle(cardRect.X + 20, cardRect.Y + 56, cardRect.Width - 40, 24));
+                using (var quoteBg = new SolidBrush(Color.FromArgb(style == "paper" ? 34 : 24, 255, 255, 255)))
+                using (var quotePath = RoundRect(new Rectangle(cardRect.X + 18, cardRect.Y + 82, cardRect.Width - 36, 34), 12))
+                    g.FillPath(quoteBg, quotePath);
+                DrawScrollableBody(g, payload.Body, BodyFont, bodyColor, new Rectangle(cardRect.X + 28, cardRect.Y + 87, cardRect.Width - 56, 28), ccSoftAccent);
+                DrawMatchedKeywords(g, style, new Rectangle(cardRect.X + 28, cardRect.Bottom - 24, cardRect.Width - 56, 18));
+                return;
+            }
+
+            if (layout == "timeline")
+            {
+                var tagRect = new Rectangle(cardRect.Right - 72, cardRect.Y + 14, 54, 22);
+                var lineX = cardRect.X + 32;
+                using (var linePen = new Pen(Color.FromArgb(150, ccSoftAccent), 2.0f))
+                    g.DrawLine(linePen, lineX, cardRect.Y + 22, lineX, cardRect.Bottom - 26);
+                using (var dot = new SolidBrush(Color.FromArgb(235, ccPrimary)))
+                    g.FillEllipse(dot, lineX - 5, cardRect.Y + 22, 10, 10);
+                using (var dot2 = new SolidBrush(Color.FromArgb(185, ccAccent)))
+                    g.FillEllipse(dot2, lineX - 4, cardRect.Bottom - 35, 8, 8);
+                DrawTypeTag(g, style, tag, tagRect);
+                var textX = cardRect.X + 52;
+                DrawText(g, payload.Title, TitleFont, titleColor, new Rectangle(textX, cardRect.Y + 14, tagRect.Left - textX - 10, 24));
+                DrawScrollableBody(g, payload.Body, BodyFont, bodyColor, new Rectangle(textX, cardRect.Y + 44, cardRect.Right - textX - 24, 54), ccSoftAccent);
+                DrawNamePill(g, style, new Rectangle(textX, cardRect.Bottom - 31, 150, 22));
+                DrawSourceText(g, payload.Source, SmallFont, metaColor, new Rectangle(textX + 162, cardRect.Bottom - 28, cardRect.Right - textX - 184, 18));
+                DrawMatchedKeywords(g, style, new Rectangle(textX + 162, cardRect.Bottom - 28, cardRect.Right - textX - 184, 18));
+                return;
+            }
+        }
+
+        static string NormalizeToastLayout(string layout)
+        {
+            var v = (layout ?? "clean").Trim().ToLowerInvariant();
+            if (v == "hero" || v == "clean" || v == "headline" || v == "dialogue" || v == "timeline") return v;
+            return "clean";
+        }
+
+        void DrawAvatar(Graphics g, string style, Rectangle avatarRect, int radius)
+        {
+            var avatarR = (style == "tech" || style == "obsidian") ? Math.Max(7, radius - 4) : radius;
             using (var avatarPath = RoundRect(avatarRect, avatarR))
-            using (var avatarBg = new SolidBrush(Color.FromArgb(style == "minimal" ? 180 : 220, ccPrimary)))
-            using (var avatarPen = new Pen(Color.FromArgb(style == "minimal" ? 20 : 70, 255, 255, 255), 1))
+            using (var avatarBg = new LinearGradientBrush(avatarRect, Color.FromArgb(style == "minimal" ? 170 : 218, ccPrimary), Color.FromArgb(style == "minimal" ? 145 : 196, ccAccent), 35f))
+            using (var avatarPen = new Pen(Color.FromArgb(style == "minimal" ? 20 : 72, 255, 255, 255), 1))
             {
                 g.FillPath(avatarBg, avatarPath);
                 if (style != "minimal") g.DrawPath(avatarPen, avatarPath);
             }
-            using (var emojiBrush = new SolidBrush(Color.FromArgb(255, 255, 255, 255)))
+            using (var emojiBrush = new SolidBrush(Color.White))
                 DrawCentered(g, payload.Emoji, EmojiFont, emojiBrush, avatarRect);
+        }
 
-            // ── Text ──
-            var textX = avatarRect.Right + 12;
-            var textW = cardRect.Right - textX - 70;
-            var titleColor = style == "paper" ? Color.FromArgb(84, 58, 52) : ((style == "tech" || style == "obsidian") ? Color.FromArgb(236, 226, 190) : Color.FromArgb(247, 248, 255));
-            var bodyColor = style == "paper" ? Color.FromArgb(146, 104, 96) : ((style == "tech" || style == "obsidian") ? Color.FromArgb(190, 202, 214) : Color.FromArgb(184, 247, 248, 255));
-            DrawText(g, payload.Title, TitleFont, titleColor, new Rectangle(textX, cardRect.Y + 18, textW, 22));
-            var bodyRect = new Rectangle(textX, cardRect.Y + 43, textW, 42);
-            DrawScrollableBody(g, payload.Body, BodyFont, bodyColor, bodyRect, ccSoftAccent);
-
-            // ── Agent name tag ──
-            var nameRect = new Rectangle(cardRect.X + 7, avatarRect.Bottom + 5, 62, 20);
+        void DrawNamePill(Graphics g, string style, Rectangle nameRect)
+        {
             var nameBg1 = Color.FromArgb(ccNameBgA1, Blend(ccPrimary, Color.White, 0.18));
             var nameBg2 = Color.FromArgb(ccNameBgA2, Blend(ccAccent, Color.White, 0.12));
             using (var namePath = RoundRect(nameRect, 10))
@@ -1568,10 +1713,10 @@ protected override void OnPaint(PaintEventArgs e)
             }
             using (var agentNameBrush = new SolidBrush(Color.FromArgb(ccAgentNameA, 255, 255, 255)))
                 DrawCentered(g, payload.AgentName, NameFont, agentNameBrush, nameRect);
+        }
 
-            // ── Type tag ──
-            var tag = ccIsImportant ? "\u91CD\u8981" : (payload.Type == "channel" ? "\u9891\u9053" : "\u5BF9\u8BDD");
-            var tagRect = new Rectangle(cardRect.Right - 62, cardRect.Y + 14, 42, 21);
+        void DrawTypeTag(Graphics g, string style, string tag, Rectangle tagRect)
+        {
             using (var tagPath = RoundRect(tagRect, 10))
             using (var tagBg = new SolidBrush(Color.FromArgb(ccTagBgA, 255, 255, 255)))
             using (var tagPen = new Pen(Color.FromArgb(ccTagPenA, 255, 255, 255)))
@@ -1581,16 +1726,21 @@ protected override void OnPaint(PaintEventArgs e)
             }
             using (var tagBrush = new SolidBrush(Color.FromArgb(ccTagBrushA, 255, 255, 255)))
                 DrawCentered(g, tag, TagFont, tagBrush, tagRect);
+        }
 
-            // ── Matched keywords ──
-            if (ccIsImportant && !String.IsNullOrWhiteSpace(payload.MatchedKeywords))
-            {
-                var kwColor = style == "tech" ? Color.FromArgb(156, 150, 200, 255) : Color.FromArgb(156, 255, 244, 210);
-                DrawText(g, "\u547D\u4E2D: " + payload.MatchedKeywords, SmallFont, kwColor, new Rectangle(textX, cardRect.Y + 94, textW, 14));
-            }
+        static void DrawSourceText(Graphics g, string source, Font font, Color color, Rectangle rect)
+        {
+            if (String.IsNullOrWhiteSpace(source)) return;
+            var text = source.Trim();
+            if (text.Length > 42) text = "…" + text.Substring(text.Length - 41);
+            DrawText(g, text, font, color, rect);
+        }
 
-            // Foreground entrance layer: keep the three entrance visual choices obvious.
-            EntranceVisualRegistry.Apply(g, _entranceVisual, _entranceProgress, cardRect, ccPrimary, ccAccent, ccIsImportant);
+        void DrawMatchedKeywords(Graphics g, string style, Rectangle rect)
+        {
+            if (!ccIsImportant || String.IsNullOrWhiteSpace(payload.MatchedKeywords)) return;
+            var kwColor = style == "tech" ? Color.FromArgb(156, 150, 200, 255) : Color.FromArgb(156, 255, 244, 210);
+            DrawText(g, "\u547D\u4E2D: " + payload.MatchedKeywords, SmallFont, kwColor, rect);
         }
 
         static void DrawSakuraStormCard(Graphics g, Rectangle rect, GraphicsPath path, Color primary, Color accent, bool important, int borderAlpha)
@@ -1726,101 +1876,15 @@ protected override void OnPaint(PaintEventArgs e)
             }
         }
         
-        static void PlayNotificationSound(string theme)
-        {
-            try
-            {
-                var mediaDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Media");
-                string file = null;
-                var normalizedTheme = String.IsNullOrWhiteSpace(theme) ? "chime" : theme;
-                switch (normalizedTheme.ToLowerInvariant())
-                {
-                    case "off":
-                        return;
-                    case "chime":
-                    case "chimes":
-                        file = Path.Combine(mediaDir, "chimes.wav");
-                        break;
-                    case "notify":
-                        file = Path.Combine(mediaDir, "notify.wav");
-                        if (!File.Exists(file)) file = Path.Combine(mediaDir, "Windows Notify.wav");
-                        break;
-                    case "alert":
-                    case "alarm":
-                        PlayAlertSound(mediaDir);
-                        return;
-                    case "system":
-                        SystemSounds.Asterisk.Play();
-                        return;
-                    case "ding":
-                    default:
-                        file = Path.Combine(mediaDir, "ding.wav");
-                        if (!File.Exists(file)) file = Path.Combine(mediaDir, "Windows Ding.wav");
-                        break;
-                }
-
-                if (!String.IsNullOrWhiteSpace(file) && File.Exists(file))
-                {
-                    using (var player = new SoundPlayer(file))
-                    {
-                        player.Play();
-                    }
-                    return;
-                }
-
-                SystemSounds.Beep.Play();
-            }
-            catch
-            {
-                try { SystemSounds.Beep.Play(); } catch { }
-            }
-        }
-
-        static void PlayAlertSound(string mediaDir)
-        {
-            try
-            {
-                var candidates = new[]
-                {
-                    Path.Combine(mediaDir, "Windows Critical Stop.wav"),
-                    Path.Combine(mediaDir, "Windows Exclamation.wav"),
-                    Path.Combine(mediaDir, "Windows Background.wav"),
-                };
-
-                string first = null;
-                foreach (var candidate in candidates)
-                {
-                    if (File.Exists(candidate))
-                    {
-                        first = candidate;
-                        break;
-                    }
-                }
-                if (!String.IsNullOrWhiteSpace(first))
-                {
-                    using (var player = new SoundPlayer(first)) player.PlaySync();
-                    System.Threading.Thread.Sleep(90);
-                }
-
-                SystemSounds.Exclamation.Play();
-                System.Threading.Thread.Sleep(120);
-                SystemSounds.Hand.Play();
-            }
-            catch
-            {
-                try
-                {
-                    SystemSounds.Exclamation.Play();
-                    System.Threading.Thread.Sleep(120);
-                    SystemSounds.Beep.Play();
-                }
-                catch { }
-            }
-        }
-
         static void DrawText(Graphics g, string text, Font font, Color color, Rectangle rect)
         {
-            TextRenderer.DrawText(g, text ?? "", font, rect, color, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+            using (var sf = new StringFormat(StringFormatFlags.LineLimit))
+            {
+                sf.Trimming = StringTrimming.EllipsisCharacter;
+                sf.FormatFlags |= StringFormatFlags.NoClip;
+                using (var brush = new SolidBrush(color))
+                    g.DrawString(text ?? "", font, brush, rect, sf);
+            }
         }
 
         void DrawScrollableBody(Graphics g, string text, Font font, Color color, Rectangle rect, Color accent)
@@ -1830,9 +1894,6 @@ protected override void OnPaint(PaintEventArgs e)
             {
                 format.Trimming = StringTrimming.None;
                 format.FormatFlags |= StringFormatFlags.NoClip;
-                var measured = g.MeasureString(text, font, textWidth, format);
-                var lines = (int)Math.Ceiling(measured.Height / font.GetHeight(g));
-                var scrollHint = lines > 2;
                 using (var brush = new SolidBrush(color))
                 {
                     g.DrawString(text, font, brush, new RectangleF(rect.X, rect.Y, textWidth, rect.Height), format);
@@ -2134,11 +2195,11 @@ protected override void OnPaint(PaintEventArgs e)
     {
         static ParticleOverlayForm overlay;
 
-        public static void Emit(string shape, string motion, bool clicked, Color[] palette, Rectangle sourceRect, Point origin, float dirX, float dirY, bool clickOriginMode, int particleCount, double countScale, double sizeScale)
+        public static void Emit(string shape, string motion, bool clicked, Color[] palette, Rectangle sourceRect, Point origin, float dirX, float dirY, bool clickOriginMode, int particleCount, double countScale, double sizeScale, int intervalEffect)
         {
             if (overlay == null || overlay.IsDisposed)
                 overlay = new ParticleOverlayForm();
-            overlay.Emit(shape, motion, clicked, palette, sourceRect, origin, dirX, dirY, clickOriginMode, particleCount, countScale, sizeScale);
+            overlay.Emit(shape, motion, clicked, palette, sourceRect, origin, dirX, dirY, clickOriginMode, particleCount, countScale, sizeScale, intervalEffect);
         }
     }
 
@@ -2156,7 +2217,9 @@ protected override void OnPaint(PaintEventArgs e)
         readonly Random rng = new Random();
         readonly System.Collections.Generic.List<Particle> particles = new System.Collections.Generic.List<Particle>();
         int tick = 0;
+        Rectangle lastParticleDirtyRect = Rectangle.Empty;
         const double DurationMs = 1100.0;
+        const int ParticleDirtyPadding = 96;
 
         public ParticleOverlayForm()
         {
@@ -2175,7 +2238,7 @@ protected override void OnPaint(PaintEventArgs e)
             timer.Tick += delegate { Animate(); };
         }
 
-        public void Emit(string shape, string motion, bool clicked, Color[] palette, Rectangle sourceRect, Point origin, float dirX, float dirY, bool clickOriginMode, int particleCount, double countScale, double sizeScale)
+        public void Emit(string shape, string motion, bool clicked, Color[] palette, Rectangle sourceRect, Point origin, float dirX, float dirY, bool clickOriginMode, int particleCount, double countScale, double sizeScale, int intervalEffect)
         {
             if (IsDisposed) return;
             Bounds = SystemInformation.VirtualScreen;
@@ -2195,14 +2258,15 @@ protected override void OnPaint(PaintEventArgs e)
             {
                 count = (int)Math.Max(1, Math.Min(1200, Math.Round(count * scaleCount)));
             }
+            var safeIntervalEffect = Math.Max(0, Math.Min(100, intervalEffect));
             if (palette == null || palette.Length == 0) palette = new Color[] { Color.White };
-            InitParticles(safeRect, origin, count, shape, normalizedMotion, clicked, palette, dirX, dirY, clickOriginMode, scaleSize);
+            InitParticles(safeRect, origin, count, shape, normalizedMotion, clicked, palette, dirX, dirY, clickOriginMode, scaleSize, safeIntervalEffect);
             if (!Visible) Show();
             if (!timer.Enabled) timer.Start();
             Invalidate();
         }
 
-        void InitParticles(Rectangle sourceRect, Point origin, int count, string shape, string motion, bool clicked, Color[] palette, float dirX, float dirY, bool clickOriginMode, double sizeScale)
+        void InitParticles(Rectangle sourceRect, Point origin, int count, string shape, string motion, bool clicked, Color[] palette, float dirX, float dirY, bool clickOriginMode, double sizeScale, int intervalEffect)
         {
             var normalizedMotion = ParticleMotionRegistry.Normalize(motion);
             var cx = sourceRect.Left + sourceRect.Width / 2.0;
@@ -2336,41 +2400,30 @@ protected override void OnPaint(PaintEventArgs e)
                     Color = palette[i % palette.Length],
                     Shape = normalizedShape,
                     Motion = normalizedMotion,
-                    BirthTick = tick + rng.Next(0, normalizedMotion == "drift" ? 12 : 8),
+                    BirthTick = tick + ComputeBirthDelayTick(i, count, normalizedMotion, intervalEffect, lifeMs),
                     LifeMs = lifeMs,
                 });
             }
         }
 
-        static class ParticleShapeRegistry
+        int ComputeBirthDelayTick(int index, int count, string motion, int intervalEffect, float lifeMs)
         {
-            public static string Normalize(string shape)
-            {
-                var s = (shape ?? "sakura").ToLowerInvariant();
-                switch (s)
-                {
-                    case "none":
-                    case "moss":
-                    case "sakura":
-                    case "snowflake":
-                    case "butterfly":
-                    case "bubble":
-                    case "windmill":
-                    case "star":
-                    case "spark":
-                    case "shard":
-                    case "leaf":
-                    case "pixel":
-                    case "comet":
-                    case "gear":
-                    case "ember":
-                    case "crescent":
-                    case "slash":
-                        return s;
-                    default:
-                        return "sakura";
-                }
-            }
+            var normalizedMotion = ParticleMotionRegistry.Normalize(motion);
+            var baseRange = normalizedMotion == "drift" ? 12 : 8;
+            var baseDelay = rng.Next(0, baseRange);
+            var effect = Math.Max(0, Math.Min(100, intervalEffect));
+            if (effect <= 0 || count <= 1) return baseDelay;
+
+            var effectT = effect / 100.0;
+            var reserveMs = Math.Max(240.0, Math.Min(360.0, lifeMs * 0.28));
+            var durationCap = Math.Max(baseRange, (int)Math.Floor((DurationMs - reserveMs) / Math.Max(1.0, timer.Interval)));
+            var extraMax = (int)Math.Round(64.0 * effectT);
+            extraMax = Math.Max(0, Math.Min(extraMax, durationCap - baseRange));
+
+            var ordered = count <= 1 ? 0.0 : index / (double)(count - 1);
+            var waveDelay = (int)Math.Round(Math.Pow(ordered, 0.78) * extraMax);
+            var jitterRange = Math.Max(2, (int)Math.Round(3.0 + 7.0 * effectT));
+            return Math.Min(durationCap, baseDelay + waveDelay + rng.Next(0, jitterRange));
         }
 
         static class ParticleMotionRegistry
@@ -2507,6 +2560,7 @@ protected override void OnPaint(PaintEventArgs e)
 
         void Animate()
         {
+            var previousDirty = lastParticleDirtyRect;
             tick++;
             for (int i = particles.Count - 1; i >= 0; i--)
             {
@@ -2522,12 +2576,58 @@ protected override void OnPaint(PaintEventArgs e)
                 pt.Rotation += pt.Spin * 0.34f;
                 pt.WingPhase += 0.12f;
             }
-            Invalidate();
+            InvalidateParticleRegion(previousDirty, ComputeParticleDirtyRect());
             if (particles.Count == 0)
             {
                 timer.Stop();
+                lastParticleDirtyRect = Rectangle.Empty;
                 Hide();
             }
+        }
+
+        Rectangle ComputeParticleDirtyRect()
+        {
+            Rectangle bounds = Rectangle.Empty;
+            for (int i = 0; i < particles.Count; i++)
+            {
+                var pt = particles[i];
+                if (tick < pt.BirthTick) continue;
+                var rect = EstimateParticleBounds(pt);
+                bounds = bounds.IsEmpty ? rect : Rectangle.Union(bounds, rect);
+            }
+            if (bounds.IsEmpty) return Rectangle.Empty;
+            bounds.Inflate(ParticleDirtyPadding, ParticleDirtyPadding);
+            bounds.Intersect(ClientRectangle);
+            return bounds;
+        }
+
+        Rectangle EstimateParticleBounds(Particle pt)
+        {
+            var radius = Math.Max(42.0f, (pt.Radius + 44.0f) * Math.Max(0.5f, pt.Scale));
+            var shape = (pt.Shape ?? "").ToLowerInvariant();
+            if (shape == "comet") radius += 64.0f;
+            else if (shape == "butterfly" || shape == "windmill" || shape == "snowflake") radius += 24.0f;
+            return Rectangle.Ceiling(new RectangleF(pt.X - radius, pt.Y - radius, radius * 2.0f, radius * 2.0f));
+        }
+
+        void InvalidateParticleRegion(Rectangle previousDirty, Rectangle currentDirty)
+        {
+            Rectangle dirty;
+            if (previousDirty.IsEmpty) dirty = currentDirty;
+            else if (currentDirty.IsEmpty) dirty = previousDirty;
+            else dirty = Rectangle.Union(previousDirty, currentDirty);
+
+            if (dirty.IsEmpty)
+            {
+                Invalidate();
+            }
+            else
+            {
+                dirty.Intersect(ClientRectangle);
+                if (dirty.IsEmpty) Invalidate();
+                else Invalidate(dirty, false);
+            }
+            lastParticleDirtyRect = currentDirty;
         }
 
         protected override void Dispose(bool disposing)
@@ -2543,9 +2643,10 @@ protected override void OnPaint(PaintEventArgs e)
 
         protected override void OnPaintBackground(PaintEventArgs e)
         {
-            // TransparencyKey windows must be cleared to the key color every frame.
-            // Leaving the background unpainted can expose a black backing surface.
-            e.Graphics.Clear(BackColor);
+            // TransparencyKey windows must be cleared to the key color for the invalidated region.
+            // FillRectangle respects ClipRectangle; Graphics.Clear may clear the whole surface.
+            using (var keyBrush = new SolidBrush(BackColor))
+                e.Graphics.FillRectangle(keyBrush, e.ClipRectangle);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -2562,6 +2663,7 @@ protected override void OnPaint(PaintEventArgs e)
             {
                 var pt = particles[idx];
                 if (tick < pt.BirthTick) continue;
+                if (!e.ClipRectangle.IsEmpty && !EstimateParticleBounds(pt).IntersectsWith(e.ClipRectangle)) continue;
                 var age = Math.Min(1.0, (tick - pt.BirthTick) * timer.Interval / Math.Max(1.0, pt.LifeMs));
                 var fadeOutT = Math.Max(0.0, (age - 0.46) / 0.54);
                 // TransparencyKey windows leak color on semi-transparent edges, so keep particles opaque
@@ -2614,22 +2716,9 @@ protected override void OnPaint(PaintEventArgs e)
                             {
                                 var s = g.Save();
                                 g.RotateTransform(i * 90f + 16f);
-                                using (var blade = new GraphicsPath())
-                                using (var inner = new GraphicsPath())
-                                {
-                                    blade.StartFigure();
-                                    blade.AddBezier(0.0f, 0.0f, 5.8f, -2.6f, 10.6f, -7.8f, 3.2f, -14.2f);
-                                    blade.AddBezier(3.2f, -14.2f, -0.8f, -10.0f, -2.9f, -4.0f, 0.0f, 0.0f);
-                                    blade.CloseFigure();
-                                    g.FillPath(bladeBrush, blade);
-                                    g.DrawPath(shadePen, blade);
-
-                                    inner.StartFigure();
-                                    inner.AddBezier(1.2f, -1.2f, 4.8f, -3.0f, 7.4f, -6.4f, 3.0f, -10.8f);
-                                    inner.AddBezier(3.0f, -10.8f, 1.0f, -7.4f, -0.2f, -3.1f, 1.2f, -1.2f);
-                                    inner.CloseFigure();
-                                    g.FillPath(innerBrush, inner);
-                                }
+                                g.FillPath(bladeBrush, ParticleGeometryCache.WindmillBlade);
+                                g.DrawPath(shadePen, ParticleGeometryCache.WindmillBlade);
+                                g.FillPath(innerBrush, ParticleGeometryCache.WindmillInner);
                                 g.DrawLine(edgePen, 1.2f, -2.0f, 6.8f, -9.4f);
                                 g.FillRectangle(innerBrush, 6.0f, -12.0f, 2.0f, 2.0f);
                                 g.Restore(s);
@@ -2654,34 +2743,12 @@ protected override void OnPaint(PaintEventArgs e)
                         using (var veinPen = new Pen(Blend(pt.Color, Color.White, 0.62), 0.8f))
                         using (var antenna = new Pen(Blend(pt.Color, Color.White, 0.50), 0.8f))
                         {
-                            using (var leftTop = new GraphicsPath())
-                            using (var rightTop = new GraphicsPath())
-                            using (var leftLow = new GraphicsPath())
-                            using (var rightLow = new GraphicsPath())
-                            {
-                                leftTop.AddBezier(0, -2, -7, -13, -17, -8, -13, 2);
-                                leftTop.AddBezier(-13, 2, -7, 3, -3, 2, 0, -2);
-                                rightTop.AddBezier(0, -2, 7, -13, 17, -8, 13, 2);
-                                rightTop.AddBezier(13, 2, 7, 3, 3, 2, 0, -2);
-                                leftLow.AddBezier(-1, 1, -8, 1, -12, 8, -5, 10);
-                                leftLow.AddBezier(-5, 10, -2, 7, 0, 4, -1, 1);
-                                rightLow.AddBezier(1, 1, 8, 1, 12, 8, 5, 10);
-                                rightLow.AddBezier(5, 10, 2, 7, 0, 4, 1, 1);
-                                g.FillPath(outerWing, leftTop);
-                                g.FillPath(outerWing, rightTop);
-                                g.FillPath(lowerWing, leftLow);
-                                g.FillPath(lowerWing, rightLow);
-                            }
-                            using (var leftInner = new GraphicsPath())
-                            using (var rightInner = new GraphicsPath())
-                            {
-                                leftInner.AddBezier(-2, -2, -7, -9, -12, -6, -9, 0);
-                                leftInner.AddBezier(-9, 0, -6, 1, -3, 1, -2, -2);
-                                rightInner.AddBezier(2, -2, 7, -9, 12, -6, 9, 0);
-                                rightInner.AddBezier(9, 0, 6, 1, 3, 1, 2, -2);
-                                g.FillPath(innerWing, leftInner);
-                                g.FillPath(innerWing, rightInner);
-                            }
+                            g.FillPath(outerWing, ParticleGeometryCache.ButterflyLeftTop);
+                            g.FillPath(outerWing, ParticleGeometryCache.ButterflyRightTop);
+                            g.FillPath(lowerWing, ParticleGeometryCache.ButterflyLeftLow);
+                            g.FillPath(lowerWing, ParticleGeometryCache.ButterflyRightLow);
+                            g.FillPath(innerWing, ParticleGeometryCache.ButterflyLeftInner);
+                            g.FillPath(innerWing, ParticleGeometryCache.ButterflyRightInner);
                             g.DrawLine(veinPen, -1.0f, -1.0f, -10.5f, -5.8f);
                             g.DrawLine(veinPen, 1.0f, -1.0f, 10.5f, -5.8f);
                             g.DrawLine(veinPen, -0.4f, 2.4f, -7.4f, 7.2f);
@@ -2722,18 +2789,9 @@ protected override void OnPaint(PaintEventArgs e)
                     case "star":
                         using (var starBrush = new SolidBrush(Blend(pt.Color, Color.White, 0.34)))
                         using (var starPen = new Pen(Blend(pt.Color, Color.White, 0.68), 0.8f))
-                        using (var starPath = new GraphicsPath())
                         {
-                            var points = new PointF[10];
-                            for (int i = 0; i < points.Length; i++)
-                            {
-                                var a = -Math.PI / 2.0 + i * Math.PI / 5.0;
-                                var rr = i % 2 == 0 ? 11.5f : 4.8f;
-                                points[i] = new PointF((float)Math.Cos(a) * rr, (float)Math.Sin(a) * rr);
-                            }
-                            starPath.AddPolygon(points);
-                            g.FillPath(starBrush, starPath);
-                            g.DrawPath(starPen, starPath);
+                            g.FillPath(starBrush, ParticleGeometryCache.Star);
+                            g.DrawPath(starPen, ParticleGeometryCache.Star);
                         }
                         break;
                     case "spark":
@@ -2760,28 +2818,18 @@ protected override void OnPaint(PaintEventArgs e)
                     case "shard":
                         using (var shardBrush = new SolidBrush(Blend(pt.Color, Color.White, 0.20)))
                         using (var shardPen = new Pen(Blend(pt.Color, Color.White, 0.62), 0.9f))
-                        using (var shard = new GraphicsPath())
                         {
-                            shard.StartFigure();
-                            shard.AddLine(-2.5f, -13.0f, 9.5f, -2.0f);
-                            shard.AddLine(4.0f, 11.0f, -7.5f, 5.0f);
-                            shard.CloseFigure();
-                            g.FillPath(shardBrush, shard);
-                            g.DrawPath(shardPen, shard);
+                            g.FillPath(shardBrush, ParticleGeometryCache.Shard);
+                            g.DrawPath(shardPen, ParticleGeometryCache.Shard);
                             g.DrawLine(shardPen, -1.2f, -9.0f, 3.8f, 6.6f);
                         }
                         break;
                     case "leaf":
                         using (var leafBrush = new SolidBrush(Blend(pt.Color, Color.FromArgb(160, 245, 176), 0.34)))
                         using (var leafPen = new Pen(Blend(pt.Color, Color.White, 0.46), 0.8f))
-                        using (var leaf = new GraphicsPath())
                         {
-                            leaf.StartFigure();
-                            leaf.AddBezier(0.0f, -12.0f, -9.5f, -5.2f, -8.0f, 6.8f, 0.0f, 11.0f);
-                            leaf.AddBezier(0.0f, 11.0f, 8.0f, 6.8f, 9.5f, -5.2f, 0.0f, -12.0f);
-                            leaf.CloseFigure();
-                            g.FillPath(leafBrush, leaf);
-                            g.DrawPath(leafPen, leaf);
+                            g.FillPath(leafBrush, ParticleGeometryCache.Leaf);
+                            g.DrawPath(leafPen, ParticleGeometryCache.Leaf);
                             g.DrawLine(leafPen, 0.0f, -9.0f, 0.0f, 8.0f);
                         }
                         break;
@@ -2847,13 +2895,10 @@ protected override void OnPaint(PaintEventArgs e)
                         }
                         break;
                     case "ember":
-                        using (var ember = new GraphicsPath())
                         using (var emberBrush = new SolidBrush(Blend(pt.Color, Color.FromArgb(255, 168, 70), 0.34)))
                         using (var emberCore = new SolidBrush(Blend(pt.Color, Color.White, 0.46)))
                         {
-                            ember.AddBezier(0.0f, -14.0f, -8.0f, -4.0f, -4.0f, 8.0f, 0.0f, 12.0f);
-                            ember.AddBezier(0.0f, 12.0f, 8.0f, 6.0f, 6.0f, -5.0f, 0.0f, -14.0f);
-                            g.FillPath(emberBrush, ember);
+                            g.FillPath(emberBrush, ParticleGeometryCache.Ember);
                             g.FillEllipse(emberCore, -2.6f, 0.5f, 5.2f, 7.0f);
                         }
                         break;
@@ -2907,23 +2952,8 @@ protected override void OnPaint(PaintEventArgs e)
                                 var s = g.Save();
                                 g.RotateTransform(i * 72f);
                                 g.ScaleTransform(breathe, breathe);
-                                using (var petal = new GraphicsPath())
-                                {
-                                    petal.StartFigure();
-                                    petal.AddBezier(0.0f, -1.0f, -5.8f, -5.2f, -6.1f, -11.2f, -1.7f, -13.7f);
-                                    petal.AddBezier(-1.7f, -13.7f, -0.7f, -11.8f, 0.0f, -11.1f, 1.7f, -13.7f);
-                                    petal.AddBezier(1.7f, -13.7f, 6.1f, -11.2f, 5.8f, -5.2f, 0.0f, -1.0f);
-                                    petal.CloseFigure();
-                                    g.FillPath(petalBrush, petal);
-                                }
-                                using (var shine = new GraphicsPath())
-                                {
-                                    shine.StartFigure();
-                                    shine.AddBezier(0.0f, -2.5f, -1.8f, -6.2f, -1.3f, -9.4f, 0.0f, -11.0f);
-                                    shine.AddBezier(0.0f, -11.0f, 1.3f, -9.4f, 1.8f, -6.2f, 0.0f, -2.5f);
-                                    shine.CloseFigure();
-                                    g.FillPath(innerBrush, shine);
-                                }
+                                g.FillPath(petalBrush, ParticleGeometryCache.SakuraPetal);
+                                g.FillPath(innerBrush, ParticleGeometryCache.SakuraShine);
                                 g.Restore(s);
                             }
                             g.FillEllipse(centerBrush, -2.4f, -2.4f, 4.8f, 4.8f);

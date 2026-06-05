@@ -34,14 +34,34 @@ function createCtx(rawConfig = {}) {
 }
 
 {
-  const { ctx, emitted, shown, publicCalls } = createCtx({ notificationDisplayMode: "custom" });
+  const { ctx, emitted, shown, publicCalls } = createCtx({
+    notificationDisplayMode: "custom",
+    notificationSoundTheme: "chime",
+    customNotificationSoundPath: "  C:/sounds/global-fallback.wav  ",
+    conversationNotificationSoundTheme: "custom",
+    conversationCustomNotificationSoundPath: "  C:/sounds/test-notify-chat.wav  ",
+  });
   const result = await execute({ message: "公共入口分支" }, ctx);
   assert.equal(publicCalls.length, 1, "custom mode should call the public showCustomToast entrypoint");
   assert.equal(publicCalls[0].body, "公共入口分支", "custom public entrypoint should receive the test notification payload");
   assert.equal(publicCalls[0].sound, true, "custom test notification should enable sound");
+  assert.equal(publicCalls[0].soundTheme, "custom", "custom test notification should use the conversation sound theme");
+  assert.equal(publicCalls[0].customSoundPath, "C:/sounds/test-notify-chat.wav", "custom test notification should use the conversation custom sound path");
   assert.equal(shown.length, 0, "custom mode with public entrypoint should not bypass through _customToast");
   assert.equal(emitted.length, 0, "custom mode with public entrypoint should not emit native notification");
   assert.match(result.content[0].text, /mode=custom/, "custom result should report custom mode");
+}
+
+{
+  const { ctx, publicCalls } = createCtx({
+    notificationDisplayMode: "custom",
+    notificationSoundTheme: "custom",
+    customNotificationSoundPath: "  C:/sounds/test-notify-fallback.wav  ",
+  });
+  await execute({ message: "旧配置兜底" }, ctx);
+  assert.equal(publicCalls.length, 1, "legacy custom config should still send one custom test notification");
+  assert.equal(publicCalls[0].soundTheme, "custom", "test notification should inherit legacy global sound theme when conversation theme is unset");
+  assert.equal(publicCalls[0].customSoundPath, "C:/sounds/test-notify-fallback.wav", "test notification should inherit legacy global custom sound path when conversation path is unset");
 }
 
 {

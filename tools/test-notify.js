@@ -45,7 +45,8 @@ export async function execute(input, ctx) {
       primary: "#9b59b6",
       accent: "#e74c3c",
       sound: displayMode === "custom" || displayMode === "native",
-      soundTheme: config.notificationSoundTheme,
+      soundTheme: config.conversationNotificationSoundTheme,
+      customSoundPath: config.conversationCustomNotificationSoundPath || config.customNotificationSoundPath,
       ...sanitizeVisualPreviewPayload(rawConfig),
     };
 

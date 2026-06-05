@@ -12,7 +12,7 @@ export const parameters = {
   type: "object",
   properties: {
     limit: { type: "integer", description: "返回条数，默认 10", default: 10 },
-    type: { type: "string", enum: ["conversation", "channel", "dm", ""], description: "筛选通知类型" },
+    type: { type: "string", enum: ["conversation", "channel", "dm", "status", ""], description: "筛选通知类型" },
   },
 };
 
@@ -46,7 +46,7 @@ export async function execute(input, ctx) {
     const lines_out = recent.map((r) => {
       const ts = new Date(r.ts).toLocaleTimeString("zh-CN", { hour12: false });
       const icon = r.emoji || "●";
-      const typeLabel = r.type === "conversation" ? "对话" : r.type === "channel" ? "频道" : "私信";
+      const typeLabel = r.type === "conversation" ? "对话" : r.type === "channel" ? "频道" : r.type === "dm" ? "私信" : r.type === "status" ? "状态" : "通知";
       return `${ts} [${typeLabel}] ${icon} ${r.title} — ${r.body}`;
     });
 

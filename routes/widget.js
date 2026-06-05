@@ -1,14 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CustomToast } from "../lib/custom-toast.js";
-import { TOAST_EFFECTS, VISUAL_COMBO_PACKS } from "../lib/effect-registry.js";
+import { TOAST_EFFECTS, VISUAL_COMBO_PACKS, resolvePanelTheme } from "../lib/effect-registry.js";
 import {
   intValue,
   normalizeSettings,
   normalizeWidgetConfig,
+  reconcileCustomSoundPathInheritance,
   sanitizeSettingsPayload,
   sanitizeVisualPreviewPayload,
 } from "../lib/notification-config.js";
+import { resolveScopedSound } from "../lib/sound/sound-resolver.js";
+import { pickSoundFile } from "../lib/sound/windows-sound-picker.js";
 
 const MAX_WIDGET_ITEMS = 30;
 const DEFAULT_PLUGIN_ID = "notification-hub";
@@ -38,12 +41,12 @@ export default function (app, ctx) {
     return c.json({ latestClick });
   });
 
-  app.get("/clear", (c) => {
-    clearRecords(ctx);
-    return c.json({ ok: true });
-  });
-
-  app.post("/clear", (c) => {
+  app.post("/clear", async (c) => {
+    let body = {};
+    try { body = await c.req.json(); } catch { body = {}; }
+    if (body.confirm !== true) {
+      return c.json({ ok: false, error: "confirm required" });
+    }
     clearRecords(ctx);
     return c.json({ ok: true });
   });
@@ -53,20 +56,38 @@ export default function (app, ctx) {
     return c.json(normalizeSettings(readConfig(ctx)));
   });
 
+  app.post("/pick-sound", async (c) => {
+    try {
+      let body = {};
+      try { body = await c.req.json(); } catch { body = {}; }
+      const result = await pickSoundFile({
+        target: body.target,
+        initialPath: body.currentPath,
+        dataDir: ctx.dataDir,
+        log: ctx.log,
+      });
+      return c.json(result);
+    } catch (err) {
+      ctx.log?.warn?.("notification-hub sound picker failed:", err?.message || err);
+      return c.json({ ok: false, error: err?.message || "sound picker failed" });
+    }
+  });
+
   app.post("/test-notification", async (c) => {
     try {
       const savedConfig = readConfig(ctx);
       let body = {};
       try { body = await c.req.json(); } catch { body = {}; }
       const preview = body && body.preview === true;
-      const config = preview ? normalizeSettings({ ...savedConfig, ...sanitizeSettingsPayload(body) }) : normalizeSettings(savedConfig);
+      const previewUpdates = preview ? reconcileCustomSoundPathInheritance(sanitizeSettingsPayload(body), savedConfig) : {};
+      const config = preview ? normalizeSettings({ ...savedConfig, ...previewUpdates }) : normalizeSettings(savedConfig);
       const testType = preview ? sanitizePreviewTestType(body.testType) : "conversation";
       const visual = preview ? sanitizeVisualPreviewPayload(body) : {};
       const count = preview ? intValue(body.count, 1, 1, 10) : 1;
       const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
       const notifications = buildPreviewNotifications({ testType, count, config, visual, requestId, preview });
       ctx.log?.info?.(`[notification-hub] test-notification requestId=${requestId} preview=${preview} testType=${testType} count=${count} notifications=${notifications.length} source=${preview ? "settings-preview" : "settings-test"} visual=${JSON.stringify(visual)}`);
-      const toast = ctx._customToast || new CustomToast({ pluginDir: ctx.pluginDir, dataDir: ctx.dataDir, log: ctx.log, physicsPreset: visual.physicsPreset || config.physicsPreset, toastTransportMode: visual.toastTransportMode || config.toastTransportMode, autoParticleCountScale: visual.autoParticleCountScale || config.autoParticleCountScale, manualParticleCountScale: visual.manualParticleCountScale || config.manualParticleCountScale, particleSizeScale: visual.particleSizeScale || config.particleSizeScale });
+      const toast = ctx._customToast || new CustomToast({ pluginDir: ctx.pluginDir, dataDir: ctx.dataDir, log: ctx.log, physicsPreset: visual.physicsPreset || config.physicsPreset, toastTransportMode: visual.toastTransportMode || config.toastTransportMode, autoParticleCountScale: visual.autoParticleCountScale || config.autoParticleCountScale, manualParticleCountScale: visual.manualParticleCountScale || config.manualParticleCountScale, particleSizeScale: visual.particleSizeScale || config.particleSizeScale, particleIntervalEffect: visual.particleIntervalEffect ?? config.particleIntervalEffect });
       for (const baseNotification of notifications) {
         const notification = ctx._notificationHubPlugin?._decorateToastNotification
           ? ctx._notificationHubPlugin._decorateToastNotification(baseNotification)
@@ -88,7 +109,8 @@ export default function (app, ctx) {
       if (typeof body !== "object" || !body) {
         return c.json({ ok: false, error: "invalid payload" });
       }
-      const updates = sanitizeSettingsPayload(body);
+      const previousConfig = readConfig(ctx);
+      const updates = reconcileCustomSoundPathInheritance(sanitizeSettingsPayload(body), previousConfig);
       if (ctx.config?.setMany) {
         ctx.config.setMany(updates);
       } else if (ctx.config?.set) {
@@ -98,8 +120,16 @@ export default function (app, ctx) {
       } else {
         return c.json({ ok: false, error: "plugin config API unavailable" });
       }
-      ctx._notificationHubPlugin?._refreshConfigNow?.();
-      const saved = normalizeSettings(readConfig(ctx));
+      const runtimeConfigSnapshot = { ...previousConfig, ...updates };
+      const plugin = ctx._notificationHubPlugin;
+      if (plugin?.applySettingsUpdates) {
+        plugin.applySettingsUpdates(previousConfig, updates);
+      } else if (plugin?.applyRuntimeConfigSnapshot) {
+        plugin.applyRuntimeConfigSnapshot(runtimeConfigSnapshot);
+      } else {
+        plugin?._refreshConfigNow?.();
+      }
+      const saved = normalizeSettings(runtimeConfigSnapshot);
       ctx.log?.info?.("notification-hub settings updated:", Object.keys(updates).join(", "));
       return c.json({ ok: true, settings: saved });
     } catch (err) {
@@ -128,9 +158,12 @@ function sanitizePreviewTestType(value) {
 
 function buildPreviewNotifications({ testType, count, config, visual, requestId, preview }) {
   const sourcePrefix = preview ? `settings-preview-${requestId}` : "settings-test";
-  const soundTheme = config.notificationSoundTheme || "chime";
+  const fallbackSoundTheme = config.notificationSoundTheme || "chime";
+  const scopedSound = (type) => resolveScopedSound(config, type);
+  const conversationSound = scopedSound("conversation");
+  const channelSound = scopedSound("channel");
   const withVisual = (notification) => ({
-    soundTheme,
+    ...scopedSound(notification?.type),
     ...notification,
     ...visual,
   });
@@ -147,7 +180,7 @@ function buildPreviewNotifications({ testType, count, config, visual, requestId,
       accent: "#74b9ff",
       importance: "low",
       matchedKeywords: [],
-      sound: i === 0 && config.enableChannelSound && soundTheme !== "off",
+      sound: i === 0 && channelSound.soundTheme !== "off",
       source: "#settings-preview-channel",
       meta: {
         channelId: "settings-preview-channel",
@@ -215,8 +248,8 @@ function buildPreviewNotifications({ testType, count, config, visual, requestId,
       accent: "#fdcb6e",
       importance: "important",
       matchedKeywords: [],
-      sound: config.importantNotificationSound && soundTheme !== "off",
-      soundTheme: "alert",
+      sound: config.importantNotificationSound && fallbackSoundTheme !== "off",
+      soundTheme: fallbackSoundTheme === "custom" ? "custom" : "alert",
       source: `${sourcePrefix}-error`,
       meta: { eventType: "preview_error", preview: true },
     })];
@@ -251,7 +284,7 @@ function buildPreviewNotifications({ testType, count, config, visual, requestId,
     accent: "#74b9ff",
     importance: "normal",
     matchedKeywords: [],
-    sound: i === 0 && config.enableConversationSound && soundTheme !== "off",
+    sound: i === 0 && conversationSound.soundTheme !== "off",
     source: preview ? `${sourcePrefix}-conversation-${i + 1}` : "settings-test",
     meta: { preview: true },
   }));
@@ -322,6 +355,7 @@ function renderWidget({ hanaCss, token, pluginId, config }) {
   const effectOptions = TOAST_EFFECTS;
   const htmlClasses = [
     `theme-${config.theme}`,
+    `panel-theme-${config.panelTheme}`,
     `density-${config.density}`,
     `preset-${config.preset}`,
     config.sourceTint ? "source-tint-on" : "source-tint-off",
@@ -372,6 +406,17 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
     --nh-shadow: rgba(0, 0, 0, .36);
     --nh-btn: rgba(255, 255, 255, .08);
   }
+  .panel-theme-classic { --nh-accent-1: #84653e; --nh-accent-2: #d2a76b; }
+  .panel-theme-minimal { --nh-bg: #f7f7f5; --nh-bg-2: #ffffff; --nh-surface: rgba(255,255,255,.70); --nh-surface-hover: rgba(255,255,255,.88); --nh-border: rgba(34,34,34,.12); --nh-border-soft: rgba(34,34,34,.08); --nh-accent-1: #475569; --nh-accent-2: #94a3b8; --nh-shadow: rgba(15,23,42,.10); }
+  .panel-theme-glass { --nh-bg: #edf7ff; --nh-bg-2: #fff7fb; --nh-surface: rgba(255,255,255,.42); --nh-surface-hover: rgba(255,255,255,.62); --nh-border: rgba(116,185,255,.22); --nh-border-soft: rgba(155,124,255,.14); --nh-accent-1: #7c8cff; --nh-accent-2: #ff9ecf; --nh-shadow: rgba(96,120,210,.18); --nh-btn: rgba(255,255,255,.34); }
+  .panel-theme-tech { --nh-bg: #071018; --nh-bg-2: #111827; --nh-surface: rgba(64,245,200,.075); --nh-surface-hover: rgba(64,245,200,.12); --nh-border: rgba(64,245,200,.22); --nh-border-soft: rgba(122,167,255,.12); --nh-accent-1: #40f5c8; --nh-accent-2: #7aa7ff; --nh-shadow: rgba(0,0,0,.42); --nh-btn: rgba(64,245,200,.08); }
+  .panel-theme-aurora { --nh-bg: #eef7ff; --nh-bg-2: #fff5fb; --nh-surface: rgba(255,255,255,.50); --nh-surface-hover: rgba(255,255,255,.70); --nh-border: rgba(116,185,255,.22); --nh-border-soft: rgba(162,155,254,.14); --nh-accent-1: #6c8cff; --nh-accent-2: #ff9bd2; --nh-shadow: rgba(90,120,200,.16); }
+  .panel-theme-sakura-storm { --nh-bg: #fff0f7; --nh-bg-2: #fff8fb; --nh-surface: rgba(255,255,255,.56); --nh-surface-hover: rgba(255,255,255,.76); --nh-border: rgba(255,79,159,.20); --nh-border-soft: rgba(255,79,159,.12); --nh-accent-1: #ff4f9f; --nh-accent-2: #ffd1e8; --nh-shadow: rgba(214,60,130,.16); }
+  .panel-theme-obsidian { --nh-bg: #0d0c0a; --nh-bg-2: #1a1712; --nh-surface: rgba(255,214,138,.07); --nh-surface-hover: rgba(255,214,138,.12); --nh-border: rgba(255,214,138,.20); --nh-border-soft: rgba(255,214,138,.11); --nh-accent-1: #d6a84f; --nh-accent-2: #fff0a6; --nh-shadow: rgba(0,0,0,.46); --nh-btn: rgba(255,214,138,.08); }
+  .panel-theme-hologram { --nh-bg: #101124; --nh-bg-2: #171b34; --nh-surface: rgba(140,170,255,.085); --nh-surface-hover: rgba(140,170,255,.13); --nh-border: rgba(150,220,255,.20); --nh-border-soft: rgba(215,183,255,.12); --nh-accent-1: #8ea7ff; --nh-accent-2: #7df3ff; --nh-shadow: rgba(0,0,0,.40); --nh-btn: rgba(140,170,255,.08); }
+  .panel-theme-paper { --nh-bg: #f4ead8; --nh-bg-2: #fffaf0; --nh-surface: rgba(255,252,244,.62); --nh-surface-hover: rgba(255,252,244,.82); --nh-border: rgba(139,92,45,.16); --nh-border-soft: rgba(139,92,45,.10); --nh-accent-1: #8a6240; --nh-accent-2: #d7a86e; --nh-shadow: rgba(116,78,38,.15); }
+  .panel-theme-ember { --nh-bg: #170d09; --nh-bg-2: #25120b; --nh-surface: rgba(255,122,24,.08); --nh-surface-hover: rgba(255,122,24,.13); --nh-border: rgba(255,209,102,.22); --nh-border-soft: rgba(255,122,24,.13); --nh-accent-1: #ff7a18; --nh-accent-2: #ffd166; --nh-shadow: rgba(0,0,0,.44); --nh-btn: rgba(255,122,24,.09); }
+  .panel-theme-moonlight { --nh-bg: #0d1020; --nh-bg-2: #171b35; --nh-surface: rgba(142,167,255,.08); --nh-surface-hover: rgba(215,183,255,.13); --nh-border: rgba(215,183,255,.18); --nh-border-soft: rgba(142,167,255,.12); --nh-accent-1: #8ea7ff; --nh-accent-2: #d7b7ff; --nh-shadow: rgba(0,0,0,.42); --nh-btn: rgba(142,167,255,.08); }
   @media (prefers-color-scheme: dark) {
     .theme-auto {
       color-scheme: dark;
@@ -903,6 +948,13 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
     if (type === "textarea") {
       return '<div class="setting-row" style="flex-wrap:wrap"><div class="setting-label" style="width:100%;margin-bottom:6px">' + esc(label) + (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') + '</div><textarea class="setting-input" data-key="' + escAttr(key) + '">' + esc(value || '') + '</textarea></div>';
     }
+    if (type === "text") {
+      return '<div class="setting-row" style="flex-wrap:wrap"><div class="setting-label" style="width:100%;margin-bottom:6px">' + esc(label) + (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') + '</div><input class="setting-input" type="text" data-key="' + escAttr(key) + '" value="' + escAttr(value || '') + '"></div>';
+    }
+    if (type === "soundPath") {
+      var target = opts && opts.target ? opts.target : "status";
+      return '<div class="setting-row" style="flex-wrap:wrap"><div class="setting-label" style="width:100%;margin-bottom:6px">' + esc(label) + (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') + '</div><div style="display:grid;grid-template-columns:1fr auto;gap:calc(8px * var(--nh-scale));width:100%;align-items:center"><input class="setting-input" type="text" data-key="' + escAttr(key) + '" value="' + escAttr(value || '') + '"><button type="button" class="btn sound-picker" data-key="' + escAttr(key) + '" data-target="' + escAttr(target) + '" style="height:calc(34px * var(--nh-scale));padding:0 calc(10px * var(--nh-scale));font-size:calc(12px * var(--nh-scale));white-space:nowrap">📁 选择</button></div></div>';
+    }
     if (type === "range") {
       var min = opts && opts.min != null ? Number(opts.min) : 0;
       var max = opts && opts.max != null ? Number(opts.max) : 3;
@@ -921,105 +973,77 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
 
   function renderSettingsForm(cfg) {
     return ''
-      // Notification Display
-      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🔔</span> 通知显示</div>'
-      + input('notificationDisplayMode', '弹窗样式', '', 'select', cfg.notificationDisplayMode, [
+      // Delivery Basics
+      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🔔</span> 通知方式</div>'
+      + input('notificationDisplayMode', '显示方式', '选择通知出现在哪里：自定义弹窗、Windows 原生通知，或只记录到通知中心。', 'select', cfg.notificationDisplayMode, [
         { value: 'custom', label: '自定义弹窗' },
         { value: 'native', label: 'Windows 原生通知' },
         { value: 'off', label: '仅记录到列表' },
       ])
-      + input('enableConversationSound', '聊天提示音', 'Agent 回复完成时播放提示音', 'toggle', cfg.enableConversationSound)
-      + input('enableChannelSound', '频道提示音', '频道新消息是否播放提示音', 'toggle', cfg.enableChannelSound)
-      + input('notificationSoundTheme', '提示音主题', '选择通知提醒音风格', 'select', cfg.notificationSoundTheme, optionList('soundThemes'))
+      + input('enableConversationNotification', '对话结束通知', 'Agent 回复完成时弹窗', 'toggle', cfg.enableConversationNotification)
+      + input('enableChannelNotification', '频道消息通知', '频道里有新消息时弹窗', 'toggle', cfg.enableChannelNotification)
+      + input('enableStatusNotifications', '状态监控通知', '后台任务、定时任务提醒', 'toggle', cfg.enableStatusNotifications)
+      + input('enableErrorNotifications', '错误/失败通知', '运行异常或失败时弹窗', 'toggle', cfg.enableErrorNotifications)
+      + input('enableTaskDoneNotifications', '任务完成通知', '后台任务或定时任务完成时弹窗，默认关闭避免刷屏', 'toggle', cfg.enableTaskDoneNotifications)
       + '</div>'
-      // Popup Visuals
-      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">✨</span> 弹窗视觉</div>'
-      + input('visualComboPack', '组合包', '一键套用弹窗风格、登场效果、粒子贴图、轨迹、物理手感和弹窗配色。选自定义可手动微调。', 'select', cfg.visualComboPack, optionList('visualComboPacks'))
-      + input('toastTransportMode', '弹窗舞动风格', '只控制弹窗运动与编队方式：群舞弹簧保留共享栈物理，独奏轻弹让每张卡片独立运动。以后新运动逻辑也会加在这里。', 'select', cfg.toastTransportMode, [
-        { value: 'managed', label: '群舞弹簧' },
-        { value: 'independent', label: '独奏轻弹' },
-      ])
-      + input('toastStyle', '弹窗风格', '右下角自定义弹窗的卡片外观', 'select', cfg.toastStyle, optionList('toastStyles'))
-      + input('particleShape', '消失粒子', '弹窗退场时释放的粒子形状', 'select', cfg.particleShape, optionList('particleShapes'))
-      + input('autoParticleCountScale', '自动粒子数量倍率', '自动消失时释放的粒子数量倍率。1.0 为标准，数值越大越密。', 'range', cfg.autoParticleCountScale, { min: 0.2, max: 4.0, step: 0.1, defaultValue: 1.0 })
-      + input('manualParticleCountScale', '手动粒子数量倍率', '手动关闭或点击退场时释放的粒子数量倍率。', 'range', cfg.manualParticleCountScale, { min: 0.2, max: 4.0, step: 0.1, defaultValue: 1.0 })
-      + input('particleSizeScale', '粒子大小倍率', '统一调节退场粒子的绘制大小。', 'range', cfg.particleSizeScale, { min: 0.5, max: 3.0, step: 0.1, defaultValue: 1.0 })
-      + input('entranceVisual', '弹窗登场效果', '只控制弹窗进入时的视觉效果，不改变窗体运动。', 'select', cfg.entranceVisual, [
-        { value: 'classic', label: '经典光晕' },
-        { value: 'fade', label: '柔光浮现' },
-        { value: 'gather', label: '裂痕拼合' },
-        { value: 'scan', label: '扫描切入' },
-        { value: 'stardust', label: '星尘凝结' },
-        { value: 'prism', label: '棱镜折射' },
-      ])
-      + input('autoDismissMotion', '自动消失轨迹', '时间结束后自动退场的运动方式', 'select', cfg.autoDismissMotion, [
-        { value: 'drift', label: '飘散' },
-        { value: 'circle-burst', label: '圆形爆发' },
-        { value: 'rect-burst', label: '矩形爆发' },
-        { value: 'x-burst', label: 'X爆发' },
-        { value: 'vortex', label: '漩涡' },
-        { value: 'ribbon-flow', label: '丝带气流' },
-        { value: 'gravity-fall', label: '重力坠落' },
-        { value: 'orbit-decay', label: '轨道衰减' },
-        { value: 'bubble-rise', label: '气泡上浮' },
-        { value: 'windmill-gust', label: '风车阵风' },
-        { value: 'shatter-lines', label: '晶裂线' },
-        { value: 'pixel-rain', label: '像素雨' },
-        { value: 'magnet-snap', label: '磁吸弹射' },
-      ])
-      + input('manualDismissMotion', '手动关闭轨迹', '点击关闭时的退场运动方式', 'select', cfg.manualDismissMotion, [
-        { value: 'drift', label: '飘散' },
-        { value: 'circle-burst', label: '圆形爆发' },
-        { value: 'rect-burst', label: '矩形爆发' },
-        { value: 'click-burst', label: '鼠标位置爆发' },
-        { value: 'x-burst', label: 'X爆发' },
-        { value: 'vortex', label: '漩涡' },
-        { value: 'ribbon-flow', label: '丝带气流' },
-        { value: 'gravity-fall', label: '重力坠落' },
-        { value: 'orbit-decay', label: '轨道衰减' },
-        { value: 'bubble-rise', label: '气泡上浮' },
-        { value: 'windmill-gust', label: '风车阵风' },
-        { value: 'shatter-lines', label: '晶裂线' },
-        { value: 'pixel-rain', label: '像素雨' },
-        { value: 'magnet-snap', label: '磁吸弹射' },
-      ])
-      + input('physicsPreset', '物理手感', '控制弹窗进入和堆叠补位的弹簧手感', 'select', cfg.physicsPreset, [
-        { value: 'soft', label: '柔和' },
-        { value: 'lively', label: '灵动' },
-        { value: 'snappy', label: '紧致' },
-        { value: 'wild', label: '夸张' },
-      ])
-      + input('sakuraTheme', '弹窗配色', '选择弹窗的樱花和角色配色方案', 'select', cfg.sakuraTheme, optionList('sakuraThemes'))
+      // Sound
+      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🔊</span> 提示音</div>'
+      + input('conversationNotificationSoundTheme', '聊天提示音', '聊天通知使用的提示音。选择“静音”即可关闭聊天提示音。', 'select', cfg.conversationNotificationSoundTheme, optionList('soundThemes'))
+      + input('conversationCustomNotificationSoundPath', '聊天自定义声音', '聊天提示音选择“自定义声音”时使用。支持 wav、mp3、m4a、aac、wma。', 'soundPath', cfg.conversationCustomNotificationSoundPath, { target: 'conversation' })
+      + input('channelNotificationSoundTheme', '频道提示音', '频道通知使用的提示音。选择“静音”即可关闭频道提示音。', 'select', cfg.channelNotificationSoundTheme, optionList('soundThemes'))
+      + input('channelCustomNotificationSoundPath', '频道自定义声音', '频道提示音选择“自定义声音”时使用。支持 wav、mp3、m4a、aac、wma。', 'soundPath', cfg.channelCustomNotificationSoundPath, { target: 'channel' })
+      + input('notificationSoundTheme', '状态/兜底提示音', '状态、错误和其他未分来源通知使用的提示音，也作为旧配置兜底。', 'select', cfg.notificationSoundTheme, optionList('soundThemes'))
+      + input('customNotificationSoundPath', '状态/兜底自定义声音', '状态/兜底提示音选择“自定义声音”时使用；聊天/频道未填路径时也会继承它。', 'soundPath', cfg.customNotificationSoundPath, { target: 'status' })
+      + '</div>'
+      // Quick Preset
+      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🎛️</span> 视觉组合包</div>'
+      + input('visualComboPack', '组合包', '一键套用弹窗风格、登场效果、粒子贴图、轨迹、物理手感、弹窗配色和面板主题。选自定义可手动微调。', 'select', cfg.visualComboPack, optionList('visualComboPacks'))
+      + '</div>'
+      // Toast Card
+      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🃏</span> 弹窗卡片</div>'
+      + input('toastLayout', '布局', '控制头像、标题、正文、角色名和标签的排版结构。', 'select', cfg.toastLayout, optionList('toastLayouts'))
+      + input('toastStyle', '卡片风格', '右下角自定义弹窗的卡片外观。', 'select', cfg.toastStyle, optionList('toastStyles'))
+      + input('sakuraTheme', '弹窗配色', '选择弹窗的樱花和角色配色方案。', 'select', cfg.sakuraTheme, optionList('sakuraThemes'))
+      + input('toastScale', '整体大小', '等比例缩放整张弹窗，文字、头像、间距会一起变小或变大。1.0 为原始大小。', 'range', cfg.toastScale, { min: 0.7, max: 1.2, step: 0.05, defaultValue: 1.0 })
+      + input('toastOffsetX', '水平偏移', '负数向左，正数向右。允许把弹窗推到屏幕工作区之外。', 'range', cfg.toastOffsetX, { min: -1600, max: 1600, step: 10, defaultValue: 0 })
+      + input('toastOffsetY', '垂直偏移', '负数向上，正数向下。允许把弹窗推到屏幕工作区之外。', 'range', cfg.toastOffsetY, { min: -1000, max: 1000, step: 10, defaultValue: 0 })
+      + '</div>'
+      // Motion
+      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🌀</span> 弹窗动效</div>'
+      + input('toastTransportMode', '舞动风格', '只控制弹窗运动与编队方式：群舞弹簧保留共享栈物理，独奏轻弹让每张卡片独立运动。', 'select', cfg.toastTransportMode, optionList('toastTransportModes'))
+      + input('entranceVisual', '登场效果', '只控制弹窗进入时的视觉效果，不改变窗体运动。', 'select', cfg.entranceVisual, optionList('entranceVisuals'))
+      + input('autoDismissMotion', '自动消失轨迹', '时间结束后自动退场的运动方式。', 'select', cfg.autoDismissMotion, optionList('autoDismissMotions'))
+      + input('manualDismissMotion', '手动关闭轨迹', '点击关闭时的退场运动方式。', 'select', cfg.manualDismissMotion, optionList('manualDismissMotions'))
+      + input('physicsPreset', '物理手感', '控制弹窗进入和堆叠补位的弹簧手感。', 'select', cfg.physicsPreset, optionList('physicsPresets'))
+      + '</div>'
+      // Particles
+      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🌸</span> 粒子退场</div>'
+      + input('particleShape', '粒子形状', '弹窗退场时释放的粒子形状。', 'select', cfg.particleShape, optionList('particleShapes'))
+      + input('autoParticleCountScale', '自动粒子数量', '自动消失时释放的粒子数量倍率。1.0 为标准，数值越大越密。', 'range', cfg.autoParticleCountScale, { min: 0.2, max: 4.0, step: 0.1, defaultValue: 1.0 })
+      + input('manualParticleCountScale', '手动粒子数量', '手动关闭或点击退场时释放的粒子数量倍率。', 'range', cfg.manualParticleCountScale, { min: 0.2, max: 4.0, step: 0.1, defaultValue: 1.0 })
+      + input('particleSizeScale', '粒子大小', '统一调节退场粒子的绘制大小。', 'range', cfg.particleSizeScale, { min: 0.5, max: 3.0, step: 0.1, defaultValue: 1.0 })
+      + input('particleIntervalEffect', '粒子间隔', '调节粒子出现的时间间隔。0 为原始瞬爆，数值越大越像连续喷涌/星雨。', 'range', cfg.particleIntervalEffect, { min: 0, max: 100, step: 1, defaultValue: 0 })
       + '</div>'
       // Widget Panel
       + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🪟</span> 通知中心面板</div>'
-      + input('notificationWidgetTheme', '面板明暗', '右上角「通」按钮和通知中心面板的明暗模式', 'select', cfg.notificationWidgetTheme, [
-        { value: 'auto', label: '跟随系统' },
-        { value: 'light', label: '浅色' },
-        { value: 'dark', label: '暗色' },
-      ])
-      + input('notificationWidgetSourceTint', '按来源染色', '聊天、频道、状态通知使用不同色系', 'toggle', cfg.notificationWidgetSourceTint)
-      + input('notificationWidgetDensity', '面板显示密度', '控制通知中心面板的整体字号，当前“宽松大字”作为最小档。', 'select', cfg.notificationWidgetDensity, [
+      + input('panelTheme', '面板主题', '右上角「通」按钮和通知中心面板的主题。自动模式会跟随当前组合包。', 'select', cfg.panelTheme, optionList('panelThemes'))
+      + input('notificationWidgetDensity', '显示密度', '控制通知中心面板的整体字号，当前“宽松大字”作为最小档。', 'select', cfg.notificationWidgetDensity, [
         { value: 'spacious', label: '宽松大字' },
         { value: 'large', label: '超大醒目' },
         { value: 'huge', label: '巨幕阅读' },
       ])
+      + input('notificationWidgetSourceTint', '按来源染色', '聊天、频道、状态通知使用不同色系。', 'toggle', cfg.notificationWidgetSourceTint)
       + '</div>'
-      // Notification Types
-      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">📬</span> 通知类型</div>'
-      + input('enableConversationNotification', '对话结束通知', 'Agent 回复完成时弹窗', 'toggle', cfg.enableConversationNotification)
-      + input('enableChannelNotification', '频道消息通知', '', 'toggle', cfg.enableChannelNotification)
-      + input('enableStatusNotifications', '状态监控通知', '后台任务、定时任务提醒', 'toggle', cfg.enableStatusNotifications)
-      + input('enableErrorNotifications', '错误/失败通知', '', 'toggle', cfg.enableErrorNotifications)
-      + input('enableTaskDoneNotifications', '任务完成通知', '后台任务或定时任务完成时弹窗，默认关闭避免刷屏', 'toggle', cfg.enableTaskDoneNotifications)
-      + input('enableChannelAggregation', '频道聚合摘要', '短时间多条普通频道消息合并为一条。重要通知会立即弹出，不参与聚合', 'toggle', cfg.enableChannelAggregation)
-      + input('channelAggregationWindowSeconds', '聚合窗口秒数', '在多少秒内累计频道普通消息。少于阈值时到点会按原消息逐条发出', 'range', cfg.channelAggregationWindowSeconds, { min: 5, max: 300, step: 5, defaultValue: 30 })
-      + input('channelAggregationThreshold', '聚合触发条数', '窗口内达到多少条普通频道消息后立刻合并为摘要', 'range', cfg.channelAggregationThreshold, { min: 2, max: 50, step: 1, defaultValue: 4 })
+      // Channel Aggregation
+      + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">🧵</span> 频道聚合</div>'
+      + input('enableChannelAggregation', '频道聚合摘要', '短时间多条普通频道消息合并为一条。重要通知会立即弹出，不参与聚合。', 'toggle', cfg.enableChannelAggregation)
+      + input('channelAggregationWindowSeconds', '聚合窗口秒数', '在多少秒内累计频道普通消息。少于阈值时到点会按原消息逐条发出。', 'range', cfg.channelAggregationWindowSeconds, { min: 5, max: 300, step: 5, defaultValue: 30 })
+      + input('channelAggregationThreshold', '聚合触发条数', '窗口内达到多少条普通频道消息后立刻合并为摘要。', 'range', cfg.channelAggregationThreshold, { min: 2, max: 50, step: 1, defaultValue: 4 })
       + '</div>'
       // Keywords
       + '<div class="setting-group"><div class="setting-group-title"><span class="sg-icon">⭐</span> 重要通知规则</div>'
-      + input('enableKeywordImportance', '启用关键词重要通知', '命中关键词的通知升格为重要', 'toggle', cfg.enableKeywordImportance)
-      + input('importantNotificationSound', '重要通知提示音', '重要通知播放明显不同的声音', 'toggle', cfg.importantNotificationSound)
+      + input('enableKeywordImportance', '启用关键词重要通知', '命中关键词的通知升格为重要。', 'toggle', cfg.enableKeywordImportance)
+      + input('importantNotificationSound', '重要通知提示音', '重要通知播放明显不同的声音。', 'toggle', cfg.importantNotificationSound)
       + input('notificationKeywords', '重要关键词', '用逗号或换行分隔。命中这些词的通知会标记为重要。', 'textarea', cfg.notificationKeywords)
       + '</div>'
       // Save / Preview buttons
@@ -1058,6 +1082,16 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
         if (select) select.value = String(value);
         return;
       }
+      var textInput = document.querySelector('input.setting-input[type="text"][data-key="' + key + '"]');
+      if (textInput) {
+        textInput.value = String(value == null ? '' : value);
+        return;
+      }
+      var textArea = document.querySelector('textarea.setting-input[data-key="' + key + '"]');
+      if (textArea) {
+        textArea.value = String(value == null ? '' : value);
+        return;
+      }
       var rangeWrap = document.querySelector('.range-wrap[data-key="' + key + '"]');
       if (rangeWrap) {
         var range = rangeWrap.querySelector('input[type="range"]');
@@ -1066,6 +1100,13 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
         if (range) range.value = text;
         if (number) number.value = text;
       }
+    }
+
+    function soundThemeKeyForPathKey(key) {
+      if (key === 'conversationCustomNotificationSoundPath') return 'conversationNotificationSoundTheme';
+      if (key === 'channelCustomNotificationSoundPath') return 'channelNotificationSoundTheme';
+      if (key === 'customNotificationSoundPath') return 'notificationSoundTheme';
+      return '';
     }
 
     function applyVisualComboPackToForm(packId) {
@@ -1092,7 +1133,7 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
         var parent = el.closest('.select-wrap');
         payload[parent.dataset.key] = el.value;
       });
-      document.querySelectorAll('textarea[data-key]').forEach(function(el) {
+      document.querySelectorAll('textarea[data-key], input.setting-input[type="text"][data-key]').forEach(function(el) {
         payload[el.dataset.key] = el.value;
       });
       document.querySelectorAll('.range-wrap').forEach(function(parent) {
@@ -1101,6 +1142,52 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
       });
       return payload;
     }
+
+    document.querySelectorAll('.sound-picker').forEach(function(btn) {
+      btn.addEventListener('click', async function(e) {
+        e.preventDefault();
+        var key = this.dataset.key;
+        var target = this.dataset.target || 'status';
+        var input = document.querySelector('input.setting-input[type="text"][data-key="' + key + '"]');
+        var feedbackEl = document.getElementById('save-feedback');
+        if (feedbackEl) {
+          feedbackEl.className = 'save-feedback show';
+          feedbackEl.textContent = '打开 Windows 声音文件选择器...';
+        }
+        try {
+          var res = await fetch(API + '/pick-sound', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target, currentPath: input ? input.value : '' }),
+          });
+          var data = await res.json();
+          if (data.ok && data.cancelled) {
+            if (feedbackEl) {
+              feedbackEl.className = 'save-feedback show';
+              feedbackEl.textContent = '已取消选择';
+            }
+            return;
+          }
+          if (data.ok && data.path) {
+            setFieldValue(key, data.path);
+            var themeKey = soundThemeKeyForPathKey(key);
+            if (themeKey) setFieldValue(themeKey, 'custom');
+            if (feedbackEl) {
+              feedbackEl.className = 'save-feedback show success';
+              feedbackEl.textContent = '✅ 已选择声音文件，记得保存设置';
+            }
+          } else if (feedbackEl) {
+            feedbackEl.className = 'save-feedback show error';
+            feedbackEl.textContent = '❌ 选择失败: ' + (data.error || 'unknown');
+          }
+        } catch (err) {
+          if (feedbackEl) {
+            feedbackEl.className = 'save-feedback show error';
+            feedbackEl.textContent = '❌ 选择失败: ' + err.message;
+          }
+        }
+      });
+    });
 
     // Save
     document.getElementById('btn-save-settings').addEventListener('click', async function() {
@@ -1178,13 +1265,31 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
     });
   }
 
+  function resolvePanelThemeClient(value, visualComboPack) {
+    var allowed = (EFFECT_OPTIONS.panelThemes || []).map(function(o) { return o.id; });
+    var normalized = allowed.indexOf(String(value || 'auto')) >= 0 ? String(value || 'auto') : 'auto';
+    if (normalized !== 'auto') return normalized;
+    var pack = VISUAL_COMBO_PACKS && VISUAL_COMBO_PACKS[visualComboPack || 'custom'];
+    return pack && pack.fields && pack.fields.panelTheme ? pack.fields.panelTheme : 'classic';
+  }
+
+  function panelThemeBaseModeClient(panelTheme) {
+    return ['tech', 'obsidian', 'hologram', 'ember', 'moonlight'].indexOf(panelTheme) >= 0 ? 'dark' : 'light';
+  }
+
+  function panelThemeLabelClient(panelTheme) {
+    var found = (EFFECT_OPTIONS.panelThemes || []).find(function(o) { return o.id === panelTheme; });
+    return found ? found.label : '经典柔和';
+  }
+
   function applyWidgetAppearance(cfg) {
-    var theme = ['auto', 'light', 'dark'].includes(cfg.notificationWidgetTheme) ? cfg.notificationWidgetTheme : 'auto';
+    var panelTheme = resolvePanelThemeClient(cfg.panelTheme, cfg.visualComboPack);
+    var theme = panelThemeBaseModeClient(panelTheme);
     var density = ['spacious', 'large', 'huge'].includes(cfg.notificationWidgetDensity) ? cfg.notificationWidgetDensity : 'spacious';
     var sourceTint = cfg.notificationWidgetSourceTint === true;
-    document.documentElement.className = 'theme-' + theme + ' density-' + density + ' preset-warm-paper ' + (sourceTint ? 'source-tint-on' : 'source-tint-off');
+    document.documentElement.className = 'theme-' + theme + ' panel-theme-' + panelTheme + ' density-' + density + ' preset-warm-paper ' + (sourceTint ? 'source-tint-on' : 'source-tint-off');
     var subtitle = document.getElementById('subtitle');
-    if (subtitle) subtitle.textContent = (theme === 'dark' ? '暗色' : theme === 'light' ? '浅色' : '自动主题') + ' · ' + (density === 'spacious' ? '大字' : '舒适');
+    if (subtitle) subtitle.textContent = panelThemeLabelClient(panelTheme) + ' · ' + (density === 'spacious' ? '大字' : density === 'large' ? '超大' : '巨幕');
     if (typeof applyFilter === 'function') applyFilter();
     notifyResize();
   }
@@ -1216,7 +1321,7 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
   document.getElementById('btn-clear').addEventListener('click', async function() {
     setStatus("清空...");
     try {
-      await fetch(API + '/clear', { method: 'POST' });
+      await fetch(API + '/clear', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) });
     } catch (e) {}
     await loadRecords();
     setStatus("");
@@ -1236,8 +1341,9 @@ ${hanaCss ? `<link rel="stylesheet" href="${escAttr(hanaCss)}">` : ""}
 }
 
 function themeLabel(config) {
-  const theme = config.theme === "dark" ? "暗色" : config.theme === "light" ? "浅色" : "自动主题";
-  const density = config.density === "spacious" ? "大字" : "舒适";
+  const resolved = resolvePanelTheme(config.panelTheme, "custom");
+  const theme = TOAST_EFFECTS.panelThemes.find((item) => item.id === resolved)?.label || "经典柔和";
+  const density = config.density === "spacious" ? "大字" : config.density === "large" ? "超大" : "巨幕";
   return `${theme} · ${density}`;
 }
 

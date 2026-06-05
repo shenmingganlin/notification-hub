@@ -10,8 +10,6 @@ const baseConfig = {
   enableStatusNotifications: true,
   enableErrorNotifications: true,
   enableTaskDoneNotifications: true,
-  enableConversationSound: false,
-  enableChannelSound: false,
   enableKeywordImportance: false,
   importantNotificationSound: true,
   notificationSoundTheme: "chime",
@@ -188,6 +186,42 @@ assert.deepEqual(publicToast.meta?.toastColorSource, {
 }, "showCustomToast should preserve decorated toastColorSource metadata");
 
 reset();
+configure({
+  enableConversationNotification: true,
+  notificationSoundTheme: "custom",
+  customNotificationSoundPath: "  C:/sounds/custom.wav  ",
+});
+plugin._handleEvent(messageEnd("自定义提示音链路"), SESSION_PATH);
+let customSoundToast = expectOnePopup("legacy custom conversation sound path");
+assert.equal(customSoundToast.soundTheme, "custom", "legacy global custom sound theme should still feed conversation notifications");
+assert.equal(customSoundToast.customSoundPath, "C:/sounds/custom.wav", "legacy global custom sound path should still feed conversation notifications");
+
+reset();
+configure({
+  enableConversationNotification: true,
+  notificationSoundTheme: "chime",
+  customNotificationSoundPath: "C:/sounds/fallback.wav",
+  conversationNotificationSoundTheme: "custom",
+  conversationCustomNotificationSoundPath: "  C:/sounds/chat-only.mp3  ",
+});
+plugin._handleEvent(messageEnd("聊天独立自定义提示音"), SESSION_PATH);
+customSoundToast = expectOnePopup("scoped custom conversation sound path");
+assert.equal(customSoundToast.soundTheme, "custom", "conversation notifications should use the scoped conversation sound theme");
+assert.equal(customSoundToast.customSoundPath, "C:/sounds/chat-only.mp3", "conversation notifications should use the scoped conversation custom sound path before the global fallback");
+
+reset();
+configure({
+  enableStatusNotifications: true,
+  enableErrorNotifications: true,
+  notificationSoundTheme: "custom",
+  customNotificationSoundPath: "D:/tones/error.mp3",
+});
+plugin._handleEvent({ type: "error", source: "check", error: "custom boom" }, SESSION_PATH);
+customSoundToast = expectOnePopup("custom error sound path");
+assert.equal(customSoundToast.soundTheme, "custom", "important status notifications should respect the custom sound theme");
+assert.equal(customSoundToast.customSoundPath, "D:/tones/error.mp3", "important status notifications should carry the custom sound path");
+
+reset();
 const originalBuildRuntimeConfig = plugin._buildRuntimeConfig;
 let buildCount = 0;
 plugin._buildRuntimeConfig = function patchedBuildRuntimeConfig(config) {
@@ -234,21 +268,19 @@ configure({
   enableConversationNotification: true,
   enableKeywordImportance: true,
   notificationKeywords: "紧急, failure",
-  enableConversationSound: false,
   importantNotificationSound: true,
 });
 plugin._handleEvent(messageEnd("这里有紧急情况需要看"), SESSION_PATH);
-toast = expectOnePopup("keyword importance overrides conversation mute");
+toast = expectOnePopup("keyword importance uses important sound setting");
 assert.equal(toast.importance, "important");
 assert.deepEqual(toast.matchedKeywords, ["紧急"]);
-assert.equal(toast.sound, true, "important notification should use importantNotificationSound even when conversation sound is off");
+assert.equal(toast.sound, true, "important notification should use importantNotificationSound when its sound theme is not off");
 
 reset();
 configure({
   enableConversationNotification: true,
   enableKeywordImportance: true,
   notificationKeywords: "紧急",
-  enableConversationSound: true,
   importantNotificationSound: false,
 });
 plugin._handleEvent(messageEnd("紧急但重要通知声音关闭"), SESSION_PATH);
@@ -268,6 +300,23 @@ toast = expectOnePopup("channel enabled");
 assert.equal(toast.type, "channel");
 assert.equal(toast.meta.channelName, "general");
 expectEmberPalette(toast, "channel enabled");
+
+reset();
+configure({
+  enableChannelNotification: true,
+  enableChannelAggregation: false,
+  notificationSoundTheme: "chime",
+  customNotificationSoundPath: "C:/sounds/fallback.wav",
+  channelNotificationSoundTheme: "custom",
+  channelCustomNotificationSoundPath: "  D:/sounds/channel-only.m4a  ",
+});
+plugin._handleEvent(channelMessage("频道独立自定义提示音"), null);
+toast = expectOnePopup("scoped custom channel sound path");
+assert.equal(toast.type, "channel");
+assert.equal(toast.sound, true, "channel notifications should play unless the channel sound theme is off");
+assert.equal(toast.soundTheme, "custom", "channel notifications should use the scoped channel sound theme");
+assert.equal(toast.customSoundPath, "D:/sounds/channel-only.m4a", "channel notifications should use the scoped channel custom sound path before the global fallback");
+expectEmberPalette(toast, "scoped custom channel sound path");
 
 reset();
 configure({ enableChannelNotification: true, enableChannelAggregation: true, channelAggregationThreshold: 2, channelAggregationWindowSeconds: 5 });
