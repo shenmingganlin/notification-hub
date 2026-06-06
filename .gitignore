@@ -53,6 +53,7 @@ Thumbs.db
 .idea/
 
 # Archives generated during release
+dist/
 *.zip
 *.tar
 *.tar.gz

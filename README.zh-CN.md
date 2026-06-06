@@ -380,7 +380,7 @@ notification-hub/
 从 Release 页面下载最新版：
 
 ```text
-notification-hub-0.2.0.zip
+notification-hub-0.2.1.zip
 ```
 
 解压到：

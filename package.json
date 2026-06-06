@@ -1,6 +1,6 @@
 {
   "name": "notification-hub",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A visual desktop notification center plugin for HanaAgent with custom toasts, particles, physics, channel aggregation, keyword alerts, and a notification widget.",
   "type": "module",
   "private": false,
@@ -17,7 +17,8 @@
   ],
   "scripts": {
     "check": "node --check index.js && node --check routes/widget.js && node --check tools/test-notify.js && node --check lib/custom-toast.js && node --check lib/effect-registry.js && node --check lib/notification-config.js && node --check lib/delivery/toast-decoration.js && node --check lib/policy/notification-policy.js && node --check lib/sound/sound-registry.js && node --check lib/sound/sound-decision.js && node --check lib/sound/sound-resolver.js && node --check lib/sound/windows-sound-picker.js && node --check lib/notification-store.js && node --check lib/agent-resolver.js && node --check scripts/check-notification-config.mjs && node --check scripts/check-notification-types.mjs && node --check scripts/check-widget-preview.mjs && node --check scripts/check-test-notify.mjs && node --check scripts/check-sound-system.mjs && node --check scripts/check-runtime-regressions.mjs && node --check .smoke-channel-aggregation.mjs && node --check .smoke-status-notifications.mjs",
-    "test": "node scripts/check-notification-config.mjs && node scripts/check-notification-types.mjs && node scripts/check-widget-preview.mjs && node scripts/check-test-notify.mjs && node scripts/check-sound-system.mjs && node scripts/check-runtime-regressions.mjs && node .smoke-channel-aggregation.mjs && node .smoke-status-notifications.mjs"
+    "test": "node scripts/check-notification-config.mjs && node scripts/check-notification-types.mjs && node scripts/check-widget-preview.mjs && node scripts/check-test-notify.mjs && node scripts/check-sound-system.mjs && node scripts/check-runtime-regressions.mjs && node .smoke-channel-aggregation.mjs && node .smoke-status-notifications.mjs",
+    "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1"
   },
   "engines": {
     "node": ">=18"

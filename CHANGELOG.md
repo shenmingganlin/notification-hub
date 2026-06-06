@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1 - 2026-06-06
+
+### Fixed
+
+- Fixed the release zip layout so `manifest.json` is placed at the archive root for direct manual installation into `%USERPROFILE%\.hanako\plugins\notification-hub`.
+- Added a release packaging script with zip-root validation to prevent nested `notification-hub/manifest.json` archives.
+- Updated install docs to reference `notification-hub-0.2.1.zip`.
+
+### Validation
+
+- `npm run check`
+- `npm test`
+- `npm run package:release`
+
 ## 0.2.0 - 2026-06-05
 
 ### Added

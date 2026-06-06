@@ -362,7 +362,7 @@ This keeps styles, particles, motions, themes, and combo packs from turning into
 Download the latest release zip:
 
 ```text
-notification-hub-0.2.0.zip
+notification-hub-0.2.1.zip
 ```
 
 Extract it to:

@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "notification-hub",
   "name": "Notification Hub",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "对话结束与频道新消息的桌面通知系统,支持头像、堆叠、角色风格背景,并在右上角小组件中查看通知历史",
   "minAppVersion": "0.158.0",
   "trust": "full-access",
