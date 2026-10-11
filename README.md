@@ -24,7 +24,7 @@ It **delivers** and it keeps a **record**. It does not pull Hana back to the fro
 
 **A status change** covers a scheduled task finishing, an activity changing state, and errors while things run. Tool errors, an unavailable model, and rate limits all belong to this group, and errors and failures appear as the more important kind of notification.
 
-There is also a quiet rule: write a few keywords in the settings, and any notification that matches one is raised to an **important notification** and uses the sound reserved for them. Other apps can also hand it a notification to deliver.
+There is also a quiet rule: write a few keywords in the settings, and any notification that matches one is raised to an **important notification** and uses the sound reserved for them.
 
 ## 🖥️ How it reaches you
 

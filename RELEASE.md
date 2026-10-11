@@ -24,13 +24,11 @@ How it is installed changed with it:
 
 ## 🔔 More kinds of notification
 
-**The status group was spread out, and a new path came in.**
+**The status group was spread out.**
 
 0.2.1 gave you three things: a conversation ending, a channel message, and a status group holding errors, finished scheduled tasks, and activity changes.
 
 0.3.55 spreads that status group out. A tool error, a failed model call, an unavailable model, and a rate limit now each have their own origin, and errors and failures uniformly appear as the more important kind of notification. Scheduled tasks and activity changes are still there, but each has its own switch rather than sharing one gate.
-
-A new path in also appeared: other apps can hand it a notification to deliver, in ordinary, error, success, and progress flavors, and can withdraw one of theirs that is still on screen.
 
 ## 🔊 Sound went from one set to several
 
