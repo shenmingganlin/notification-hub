@@ -40,3 +40,10 @@ Notification Hub 为 HanaAgent 留下一个桌面的消息入口：事情发生�
 ```
 
 请使用上述 `apps` 目录，不要安装到 `plugins` 目录。应用使用 manifest 声明的能力。换机器时，复制整个 `notification-hub` 目录到新机器的同一位置，再从上述两个入口之一打开。
+
+## 应用市场
+
+🌸HanaAgent（兰）插件市场现已在软件中开放上线！
+☀️自制插件、配方的群友可以提交PR至此仓库：
+https://github.com/liliMozi/hana-marketplace
+💡如果不知道如何提交的可以让小花协助提交

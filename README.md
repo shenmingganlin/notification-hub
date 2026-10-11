@@ -40,3 +40,10 @@ The current version is **0.3.55**, for Windows, and requires **HanaAgent >= 0.97
 ```
 
 Use the `apps` directory shown above, not the `plugins` directory. The app uses the capabilities declared in its manifest. To move to another machine, copy the entire `notification-hub` directory to the same location on that machine, then open it through either entry point described above.
+
+## Marketplace
+
+🌸HanaAgent（兰）插件市场现已在软件中开放上线！
+☀️自制插件、配方的群友可以提交PR至此仓库：
+https://github.com/liliMozi/hana-marketplace
+💡如果不知道如何提交的可以让小花协助提交
