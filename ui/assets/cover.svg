@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="cover-paper" gradientUnits="userSpaceOnUse" x1="146" y1="48" x2="152" y2="130">
+      <stop offset="0" stop-color="#fffaf4"/>
+      <stop offset="0.3" stop-color="#f4eadc"/>
+      <stop offset="0.37" stop-color="#fff8ee"/>
+      <stop offset="0.4" stop-color="#c9a56c"/>
+      <stop offset="0.47" stop-color="#f0e2cc"/>
+      <stop offset="1" stop-color="#e6d3b6"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="180" fill="#16130f"/>
+  <path d="M63.4 55.6 L231.4 49.6 L239.4 127.6 L71.4 133.6 Z" fill="#2a241e"/>
+  <circle cx="237" cy="78" r="5.5" fill="#e7c27a"/>
+  <path d="M62 54 L230 48 L238 126 L70 132 Z" fill="url(#cover-paper)"/>
+</svg>

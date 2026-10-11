@@ -1,0 +1,1622 @@
+<!doctype html>
+<html lang="zh-CN" class="theme-light panel-theme-auto density-spacious preset-warm-paper source-tint-off">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+
+<script>
+(function () {
+  try {
+    var q = new URLSearchParams(location.search);
+    var css = q.get("hana-css") || "";
+    if (css) {
+      var link = document.createElement("link");
+      link.id = "hana-theme-css";
+      link.rel = "stylesheet";
+      link.href = css;
+      document.head.appendChild(link);
+    }
+    var appearance = (q.get("hana-theme-appearance") || "").toLowerCase();
+    if (appearance !== "dark" && appearance !== "light") {
+      var themeName = q.get("hana-theme") || "";
+      var hostDarkThemes = ["midnight", "midnight-contrast"];
+      appearance = hostDarkThemes.indexOf(themeName) >= 0 ? "dark" : (themeName ? "light" : "");
+    }
+    if (!appearance) return;
+    document.documentElement.className = "theme-" + appearance + " panel-theme-auto density-spacious preset-warm-paper source-tint-off host-frame";
+    document.documentElement.style.colorScheme = appearance;
+  } catch (e) {}
+})();
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+  :root {
+    --bg: #f4f1ea;
+    --surface: #e7e2d8;
+    --ink: #1a1916;
+    --muted: #5e594f;
+    --accent: #c43722;
+    --on-accent: #fff8f5;
+    --line: color-mix(in srgb, var(--ink) 14%, transparent);
+    --line-strong: color-mix(in srgb, var(--ink) 32%, transparent);
+    --fs-title: 20px;
+    --fs-body: 15px;
+    --fs-small: 12px;
+    --pad: 20px;
+    --face-ink: #f6f3ec;
+  }
+  .density-spacious { --fs-title: 20px; --fs-body: 15px; --fs-small: 12px; }
+  .density-large { --fs-title: 22px; --fs-body: 16px; --fs-small: 13px; }
+  .density-huge { --fs-title: 24px; --fs-body: 18px; --fs-small: 14px; }
+  .theme-light { color-scheme: light; }
+  .theme-dark { color-scheme: dark; }
+  html.theme-light.panel-theme-auto {
+    --bg: #f4f1ea; --surface: #e7e2d8; --ink: #1a1916; --muted: #5e594f;
+    --accent: #c43722; --on-accent: #fff8f5;
+  }
+  html.theme-dark.panel-theme-auto {
+    --bg: #14161c; --surface: #22252e; --ink: #ebe7df; --muted: #b1ab9f;
+    --accent: #ff6248; --on-accent: #1a100e;
+  }
+  html.panel-theme-classic {
+    --bg: #f6f0e4; --surface: #efe6d6; --ink: #2c261f; --muted: #6a5848;
+    --accent: #8a5a32; --on-accent: #fff8f5;
+  }
+  html.panel-theme-minimal {
+    --bg: #f7f7f5; --surface: #ececea; --ink: #1c1c1c; --muted: #4e555e;
+    --accent: #2f3b4d; --on-accent: #f7f7f5;
+  }
+  html.panel-theme-glass {
+    --bg: #e7eef6; --surface: #dce6f0; --ink: #1c2430; --muted: #4c5968;
+    --accent: #3e56c8; --on-accent: #f4f7ff;
+  }
+  html.panel-theme-tech {
+    --bg: #071016; --surface: #0e1c22; --ink: #d9fff3; --muted: #8fbfb2;
+    --accent: #3ee0b0; --on-accent: #071016;
+  }
+  html.panel-theme-aurora {
+    --bg: #eef3fb; --surface: #e1e8f4; --ink: #1b2433; --muted: #4d5b73;
+    --accent: #4458c8; --on-accent: #f4f6ff;
+  }
+  html.panel-theme-sakura-storm {
+    --bg: #fff1f6; --surface: #ffe3ee; --ink: #2a1520; --muted: #6e4556;
+    --accent: #d42a6a; --on-accent: #fff7fa;
+  }
+  html.panel-theme-obsidian {
+    --bg: #100e0c; --surface: #1c1814; --ink: #f3ead6; --muted: #c4b296;
+    --accent: #e0b35a; --on-accent: #1a1408;
+  }
+  html.panel-theme-hologram {
+    --bg: #101224; --surface: #191b30; --ink: #e8eeff; --muted: #b4bddc;
+    --accent: #8fdfff; --on-accent: #101224;
+  }
+  html.panel-theme-paper {
+    --bg: #f3ead9; --surface: #e9deca; --ink: #2a2118; --muted: #65543f;
+    --accent: #8a552c; --on-accent: #fff8f1;
+  }
+  html.panel-theme-ember {
+    --bg: #140d09; --surface: #22150f; --ink: #f6e6d4; --muted: #d2b59a;
+    --accent: #ff7a18; --on-accent: #1a0e08;
+  }
+  html.panel-theme-moonlight {
+    --bg: #0e1020; --surface: #17192c; --ink: #e8e9ff; --muted: #b7bcd4;
+    --accent: #cbb6ff; --on-accent: #161228;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    font-size: var(--fs-body);
+    font-weight: 400;
+    line-height: 1.5;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus { outline: none; }
+  :focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+  .num, .idx, .time, .count b, .toggle, .track-num {
+    font-family: Bahnschrift, "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+  html, body, .shell {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg);
+  }
+  html.host-frame, html.host-frame body, html.host-frame .shell { min-width: 0; }
+  .shell {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    --pad: 20px;
+  }
+  @media (max-width: 420px) { .shell { --pad: 16px; } }
+
+  .mast {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 16px;
+    padding: 18px var(--pad) 8px;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+  }
+  .mast-id {
+    display: flex;
+    align-items: baseline;
+    gap: 8px 14px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  h1 {
+    margin: 0;
+    font-size: var(--fs-title);
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    line-height: 1.2;
+  }
+  #subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--fs-small);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    line-height: 1.55;
+  }
+  .mast-tools {
+    margin-left: auto;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .count { margin: 0; color: var(--muted); font-size: var(--fs-small); }
+  .count b {
+    color: var(--ink);
+    font-size: var(--fs-title);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .text-act, #btn-refresh, #btn-clear {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line-strong);
+    padding: 0;
+    color: var(--ink);
+    font-size: var(--fs-small);
+    box-shadow: none;
+  }
+  #btn-refresh:hover, #btn-clear:hover, .text-act:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .status { font-size: var(--fs-small); color: var(--muted); }
+  @media (max-width: 420px) {
+    .mast {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: baseline;
+    }
+    .mast-id { display: contents; }
+    h1 { grid-column: 1; grid-row: 1; }
+    .mast-tools { grid-column: 2; grid-row: 1; margin-left: 0; }
+    #subtitle { grid-column: 1 / -1; grid-row: 2; }
+  }
+
+  .tabs {
+    position: relative;
+    display: flex;
+    gap: 28px;
+    padding: 4px var(--pad) 0;
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .tab {
+    flex: none;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 10px 0 11px;
+    color: var(--muted);
+    font-size: var(--fs-body);
+    font-weight: 450;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .tab.active { color: var(--ink); font-weight: 650; background: none; }
+  .tab:hover { color: var(--ink); background: none; }
+  .tabs-mark {
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    height: 3px;
+    width: 0;
+    background: var(--accent);
+    pointer-events: none;
+  }
+  .tabs.is-ready .tabs-mark {
+    transition: transform 280ms cubic-bezier(0.65, 0.02, 0.15, 1), width 280ms cubic-bezier(0.65, 0.02, 0.15, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tabs.is-ready .tabs-mark { transition: none; }
+  }
+
+  .tab-content { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+  .tab-content.active { display: flex; }
+  .main {
+    flex: 1;
+    min-height: 0;
+    overflow-x: clip;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 12px var(--pad) 10px;
+  }
+  .pill {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    color: var(--muted);
+    font-size: var(--fs-small);
+    font-weight: 400;
+    line-height: 1.55;
+    white-space: normal;
+    cursor: pointer;
+  }
+  .pill.active { color: var(--ink); font-weight: 650; background: none; border: 0; }
+  .pill:hover { color: var(--ink); background: none; }
+
+  .list { min-width: 0; }
+  .item {
+    display: grid;
+    grid-template-columns: calc(var(--fs-body) * 1.15) minmax(0, 1fr);
+    column-gap: 12px;
+    width: 100%;
+    margin: 0;
+    padding: 14px var(--pad) 13px;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    box-shadow: none;
+    text-align: left;
+    color: inherit;
+  }
+  .item:hover { background: var(--surface); }
+  .item.highlight {
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .item.highlight:hover { background: color-mix(in srgb, var(--accent) 20%, var(--bg)); }
+  .source-tint-on .item { background: color-mix(in srgb, var(--source, transparent) 9%, var(--bg)); }
+  .source-tint-on .item:hover { background: var(--surface); }
+  .source-tint-on .item.highlight { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
+  .source-tint-on .item.highlight:hover { background: color-mix(in srgb, var(--accent) 20%, var(--bg)); }
+  .avatar {
+    width: calc(var(--fs-body) * 1.15);
+    height: calc(var(--fs-body) * 1.45);
+    margin-top: 0.12em;
+    display: grid;
+    place-items: center;
+    border-radius: 0;
+    box-shadow: none;
+    color: var(--face-ink);
+    font-size: var(--fs-small);
+    font-weight: 650;
+    line-height: 1;
+  }
+  .item.muted .avatar { opacity: 0.4; }
+  .content { min-width: 0; }
+  .top, .row-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .name {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
+    font-size: 1em;
+    font-weight: 650;
+    line-height: 1.35;
+    letter-spacing: 0.01em;
+  }
+  .item.muted .name { font-weight: 450; }
+  .imp-tag {
+    color: var(--accent);
+    font-size: var(--fs-small);
+    font-weight: 650;
+    letter-spacing: 0.14em;
+    margin-left: 8px;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .click-tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 0 8px;
+    height: 1.45em;
+    line-height: 1.45em;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: var(--fs-small);
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    vertical-align: 0.08em;
+    border-radius: 0;
+  }
+  .time {
+    flex: none;
+    color: var(--muted);
+    font-size: var(--fs-small);
+    font-weight: 400;
+  }
+  .body {
+    margin: 4px 0 0;
+    font-size: 1em;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--ink);
+    word-break: break-word;
+    text-wrap: pretty;
+  }
+  .item.muted .body { color: var(--muted); }
+  .row-foot { margin-top: 6px; }
+  .source {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--fs-small);
+    line-height: 1.55;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
+  }
+  .quiet-tag {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: var(--fs-small);
+    letter-spacing: 0.08em;
+  }
+  .mute-session {
+    margin-left: 12px;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line-strong);
+    box-shadow: none;
+    padding: 0;
+    font-size: var(--fs-small);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .row-foot .mute-session { margin-left: auto; }
+  .quiet-tag + .mute-session { margin-left: 12px; }
+  .mute-session:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .empty { padding: 36px var(--pad) 48px; max-width: 28em; text-align: left; }
+  .empty-title { margin: 0; font-size: var(--fs-body); font-weight: 650; line-height: 1.2; color: var(--ink); }
+  .empty-text { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
+
+  #tab-settings.active { min-height: 0; }
+  #settings-form {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .settings-layout { flex: 1; min-height: 0; min-width: 0; overflow: auto; }
+  .catalog { list-style: none; margin: 0; padding: 8px 0 4px; }
+  .group-nav {
+    display: grid;
+    grid-template-columns: 2.2em minmax(0, 1fr);
+    gap: 8px;
+    width: 100%;
+    padding: 8px var(--pad);
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: inset 3px 0 0 transparent;
+    text-align: left;
+    color: var(--muted);
+    font-size: var(--fs-body);
+    font-weight: 400;
+    line-height: 1.35;
+    cursor: pointer;
+  }
+  .group-nav:hover { color: var(--ink); }
+  .group-nav.is-on { color: var(--ink); font-weight: 650; box-shadow: inset 3px 0 0 var(--accent); }
+  .catalog .idx { color: inherit; font-size: var(--fs-small); }
+  .group-nav.is-on .idx { color: var(--accent); }
+  .gname { min-width: 0; white-space: normal; }
+  .groups { min-width: 0; }
+  .setting-group:not(.is-open) { display: none; }
+  .detail-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 14px var(--pad) 10px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .detail-head .idx { color: var(--accent); font-size: var(--fs-body); }
+  .detail-head h2 {
+    margin: 0;
+    font-size: var(--fs-title);
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+  }
+  .fields { padding: 0 var(--pad) 12px; }
+  .field { padding: 12px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+  .field-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+  }
+  .setting-label {
+    font-weight: 650;
+    line-height: 1.35;
+    min-width: 0;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+  }
+  .val { margin-left: auto; min-width: 0; max-width: 100%; }
+  .hint {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: var(--fs-small);
+    font-weight: 400;
+    line-height: 1.55;
+    text-wrap: pretty;
+  }
+  .toggle {
+    position: static;
+    width: auto;
+    height: auto;
+    min-width: 2em;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    text-align: right;
+    color: var(--muted);
+    font-size: var(--fs-body);
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .toggle.on { background: none; color: var(--ink); }
+  .toggle .knob { display: none; }
+  .toggle::after { content: "关"; }
+  .toggle.on::after { content: "开"; }
+  .select-wrap { position: relative; display: inline-block; max-width: 100%; }
+  .select-wrap select {
+    width: 100%;
+    max-width: 16em;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line-strong);
+    box-shadow: none;
+    padding: 2px 16px 2px 0;
+    appearance: none;
+    text-align: right;
+    font-size: var(--fs-body);
+    cursor: pointer;
+  }
+  .select-wrap::after {
+    content: "";
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    border-right: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    transform: translateY(-70%) rotate(45deg);
+    pointer-events: none;
+  }
+  .select-wrap select option { background: var(--bg); color: var(--ink); }
+  .pathline, .range-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 100%;
+  }
+  .range-wrap input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 84px;
+    height: 8px;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+  }
+  .range-wrap input[type="range"]::-webkit-slider-runnable-track {
+    height: 2px;
+    background: var(--line-strong);
+    border: 0;
+    border-radius: 0;
+  }
+  .range-wrap input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 8px;
+    height: 8px;
+    margin-top: -3px;
+    background: var(--ink);
+    border: 0;
+    border-radius: 0;
+  }
+  .range-wrap input[type="range"]::-moz-range-track {
+    height: 2px;
+    background: var(--line-strong);
+    border: 0;
+    border-radius: 0;
+  }
+  .range-wrap input[type="range"]::-moz-range-thumb {
+    width: 8px;
+    height: 8px;
+    background: var(--ink);
+    border: 0;
+    border-radius: 0;
+  }
+  .track-num {
+    width: 4.2em;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    text-align: right;
+    font-size: var(--fs-body);
+    -moz-appearance: textfield;
+  }
+  .track-num::-webkit-outer-spin-button,
+  .track-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input.setting-input[type="text"], textarea.setting-input {
+    display: block;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line-strong);
+    box-shadow: none;
+    padding: 4px 0;
+    min-height: 0;
+  }
+  input.setting-input[type="text"] {
+    width: min(100%, 24em);
+    margin-left: auto;
+    text-align: right;
+  }
+  .pathline input.setting-input[type="text"] {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    margin-left: 0;
+    text-align: left;
+  }
+  textarea.setting-input {
+    width: 100%;
+    margin-left: 0;
+    min-height: 4.6em;
+    resize: vertical;
+    text-align: left;
+    line-height: 1.5;
+  }
+  .field.span .val { flex-basis: 100%; margin-left: 0; max-width: 100%; }
+  .sound-picker {
+    flex: none;
+    height: auto;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line-strong);
+    box-shadow: none;
+    padding: 0 0 1px;
+    color: var(--ink);
+    font-size: var(--fs-small);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease;
+  }
+  .sound-picker:hover { 
+    color: var(--accent); 
+    border-bottom-color: var(--accent);
+    border-bottom-width: 1.5px;
+    padding-bottom: 0.5px;
+  }
+  .dock-wrap {
+    flex: none;
+    z-index: 3;
+    padding: 12px var(--pad) 16px;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+  .dock { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; }
+  #btn-save-settings {
+    height: 36px;
+    padding: 0 16px;
+    background: var(--accent);
+    color: var(--on-accent);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    font-weight: 650;
+    font-size: var(--fs-body);
+  }
+  #btn-save-settings:hover { background: color-mix(in srgb, var(--accent) 84%, black); }
+  #btn-save-settings:active { background: color-mix(in srgb, var(--accent) 72%, black); }
+  .burst-preview {
+    height: 36px;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--ink);
+    box-shadow: none;
+    color: var(--ink);
+    font-size: var(--fs-body);
+    cursor: pointer;
+    transition: color 140ms ease, border-color 140ms ease, border-width 140ms ease;
+  }
+  .burst-preview:hover { 
+    color: var(--accent); 
+    border-bottom-color: var(--accent);
+    border-bottom-width: 1.5px;
+  }
+  .caption {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--fs-small);
+    line-height: 1.55;
+  }
+  .save-feedback {
+    display: none;
+    flex-basis: 100%;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    text-align: left;
+    font-size: var(--fs-small);
+    line-height: 1.55;
+    color: var(--muted);
+  }
+  .save-feedback.show { display: block; }
+  .save-feedback.success { color: var(--ink); background: none; }
+  .save-feedback.error { color: var(--accent); background: none; }
+  .main::-webkit-scrollbar, .settings-layout::-webkit-scrollbar, .catalog::-webkit-scrollbar, .groups::-webkit-scrollbar { width: 8px; }
+  .main::-webkit-scrollbar-thumb, .settings-layout::-webkit-scrollbar-thumb, .catalog::-webkit-scrollbar-thumb, .groups::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 0; }
+
+  @media (max-width: 680px) {
+    .detail-head { position: sticky; top: 0; z-index: 2; }
+  }
+  @media (min-width: 681px) {
+    .settings-layout {
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 12.5em minmax(0, 1fr);
+      column-gap: 28px;
+      padding-inline: var(--pad);
+    }
+    .catalog, .groups { min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    .group-nav { padding-inline: 12px; }
+    .catalog { padding-top: 12px; }
+    .detail-head, .fields { padding-inline: 0; }
+    .fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 28px;
+    }
+    .field.span { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <header class="mast">
+      <div class="mast-id">
+        <h1>通知中心</h1>
+        <p id="subtitle">跟随组合包或界面 · 大字</p>
+      </div>
+      <div class="mast-tools" id="mast-tools">
+        <p class="count" id="stat-count"><b>0</b><span> 条</span></p>
+        <button type="button" id="btn-refresh">刷新</button>
+        <button type="button" id="btn-clear">清空</button>
+        <span class="status" id="status"></span>
+      </div>
+    </header>
+
+    <div class="tabs" id="tab-bar">
+      <div class="tab active" data-tab="notifications">通知列表</div>
+      <div class="tab" data-tab="settings">设置</div>
+      <span class="tabs-mark" aria-hidden="true"></span>
+    </div>
+
+    <div class="tab-content active" id="tab-notifications">
+      <div class="main">
+        <div class="filters" id="filter-bar">
+          <span class="pill active" data-filter="all">全部</span>
+          <span class="pill" data-filter="conversation">对话</span>
+          <span class="pill" data-filter="channel">频道</span>
+          <span class="pill" data-filter="status">状态</span>
+          <span class="pill" data-filter="important">重要</span>
+        </div>
+        <div class="list" id="list"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-settings">
+      <div id="settings-form"></div>
+    </div>
+  </div>
+<script>
+(function() {
+  "use strict";
+
+  var API = "/api/apps/notification-hub/routes";
+  var TOKEN = "";
+  var VISUAL_COMBO_PACKS = {};
+  var EFFECT_OPTIONS = {};
+  var visualCatalogReady = null;
+  function loadVisualCatalog() {
+    if (visualCatalogReady) return visualCatalogReady;
+    visualCatalogReady = fetch(API + "/visual-catalog").then(function(res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then(function(data) {
+      VISUAL_COMBO_PACKS = (data && data.packs) || {};
+      EFFECT_OPTIONS = (data && data.options) || {};
+      return data;
+    }).catch(function(err) {
+      visualCatalogReady = null;
+      throw err;
+    });
+    return visualCatalogReady;
+  }
+  loadVisualCatalog().catch(function() {});
+  var latestClick = null;
+  var allRecords = [];
+  var mutedKeys = [];
+  var currentFilter = "all";
+  var recordsRequests = 0;
+  var recordsRevision = 0;
+  var muteRequests = 0;
+
+  function pageQuery(name) {
+    try { return new URLSearchParams(location.search).get(name) || ""; }
+    catch (e) { return ""; }
+  }
+
+  var _origFetch = window.fetch.bind(window);
+  window.fetch = function(url, opts) {
+    opts = opts || {};
+    var headers = new Headers(opts.headers || {});
+    var session = pageQuery("appSurfaceSession");
+    var bearer = TOKEN || pageQuery("token");
+    if (session) headers.set("X-Hana-App-Surface-Session", session);
+    if (bearer) headers.set("Authorization", "Bearer " + bearer);
+    opts.headers = headers;
+    return _origFetch(url, opts);
+  };
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function escAttr(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  }
+
+  function pad(n) { return String(n).padStart(2, "0"); }
+
+  function formatTime(ts) {
+    var d = new Date(Number(ts) || Date.now());
+    return pad(d.getMonth()+1) + "/" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function sanitizeColor(value) {
+    if (typeof value !== "string") return "#8b6f47";
+    if (/^#[0-9a-fA-F]{3,8}$/.test(value)) return value;
+    if (/^rgba?([0-9.,%s]+)$/.test(value)) return value;
+    return "#8b6f47";
+  }
+
+  function setStatus(text) {
+    var el = document.getElementById("status");
+    if (el) el.textContent = text;
+  }
+
+  var hostAppearanceLive = document.documentElement.classList.contains("host-frame")
+    ? (document.documentElement.classList.contains("theme-dark") ? "dark" : "light")
+    : "";
+  var pageHidden = false;
+  window.__nhHostBridge = {
+    setTheme: function (next) {
+      var appearance = next && next.appearance;
+      hostAppearanceLive = appearance === "dark" || appearance === "light" ? appearance : "";
+      applyWidgetAppearance(window.__nhLastSettings || { panelTheme: "auto", notificationWidgetDensity: "spacious" });
+    },
+    setHidden: function (hidden) {
+      var wasHidden = pageHidden;
+      pageHidden = !!hidden;
+      if (wasHidden && !pageHidden) loadRecords(true);
+    }
+  };
+  function notifyResize() {
+    if (pageHidden || hostAppearanceLive) return;
+    if (notifyResize._pending) return;
+    notifyResize._pending = true;
+    requestAnimationFrame(function() {
+      notifyResize._pending = false;
+      var h = document.body.scrollHeight;
+      if (h === notifyResize._lastH) return;
+      notifyResize._lastH = h;
+      parent.postMessage({ type: "resize-request", payload: { height: h } }, "*");
+    });
+  }
+  notifyResize._pending = false;
+  notifyResize._lastH = 0;
+
+  function sourceLabel(record) {
+    if (record.sourceLabel) return record.sourceLabel;
+    var meta = record.meta || {};
+    if (record.type === "conversation") {
+      return "会话 · " + (meta.sessionTitle || record.title || "未命名会话");
+    }
+    if (record.type === "channel") {
+      return "频道 · " + (meta.channelDisplayName || meta.channelName || record.title || "");
+    }
+    var source = record.source || "";
+    return /[\\/]/.test(source) ? "" : source;
+  }
+
+  function renderRecord(record) {
+    var emoji = record.emoji || (record.type === "channel" ? "#" : record.type === "status" ? "ℹ️" : "通");
+    var color = sanitizeColor(record.primary);
+    var title = record.title || record.agentName || "通知";
+    var body = record.body || "";
+    var source = sourceLabel(record);
+    var mergedCount = record.meta && record.meta.mergedCount;
+    var mergedBadge = Number(mergedCount) > 1 ? '<span class="imp-tag">' + esc(mergedCount) + ' 条</span>' : '';
+    var isImp = record.importance === "important" || record.importance === "urgent";
+    var impBadge = isImp ? '<span class="imp-tag">重要</span>' : '';
+    var highlight = '';
+    if (latestClick && record.id && latestClick.notificationId === record.id) highlight = ' highlight';
+    var clickHint = highlight ? '<span class="click-tag" title="最近一次点开的弹窗">刚点开</span>' : '';
+    var typeClass = ' type-' + (record.type || 'notification');
+    var key = muteKey(record);
+    var muted = !!(key && mutedKeys.indexOf(key) >= 0);
+    var mute = muteButton(record);
+    var foot = '';
+    if (source || mute) {
+      foot = '<div class="row-foot">'
+        + (source ? '<span class="source">' + esc(source) + '</span>' : '')
+        + (muted ? '<span class="quiet-tag">不提醒</span>' : '')
+        + mute
+        + '</div>';
+    }
+    return '<article class="item' + typeClass + (isImp ? ' important' : '') + (muted ? ' muted' : '') + highlight + '" data-id="' + escAttr(record.id || '') + '" style="--source:' + escAttr(color) + '">'
+      + '<div class="avatar" style="background:' + escAttr(color) + '">' + esc(emoji) + '</div>'
+      + '<div class="content">'
+      + '<div class="top"><div class="name">' + esc(title) + mergedBadge + impBadge + clickHint + '</div><div class="time">' + esc(formatTime(record.ts)) + '</div></div>'
+      + '<div class="body">' + esc(body) + '</div>'
+      + foot
+      + '</div></article>';
+  }
+
+  function renderEmpty() {
+    return '<div class="empty"><p class="empty-title">还没有通知</p><p class="empty-text">Agent 回复完成或频道有新消息时，会出现在这里。</p></div>';
+  }
+
+  function renderEmptyFilter() {
+    return '<div class="empty"><p class="empty-title">没有匹配的通知</p><p class="empty-text">尝试切换筛选条件查看全部通知。</p></div>';
+  }
+
+  var recordsError = "";
+  function applyFilter() {
+    var filtered = allRecords;
+    if (currentFilter === "conversation") filtered = allRecords.filter(function(r) { return r.type === "conversation"; });
+    else if (currentFilter === "channel") filtered = allRecords.filter(function(r) { return r.type === "channel"; });
+    else if (currentFilter === "status") filtered = allRecords.filter(function(r) { return r.type === "status"; });
+    else if (currentFilter === "important") filtered = allRecords.filter(function(r) { return r.importance === "important" || r.importance === "urgent"; });
+
+    var listEl = document.getElementById("list");
+    var errorBanner = recordsError ? '<div class="empty"><p class="empty-title">通知存储失败</p><p class="empty-text">' + esc(recordsError) + '</p></div>' : '';
+    listEl.innerHTML = errorBanner + (filtered.length ? filtered.map(renderRecord).join("") : (recordsError ? '' : (currentFilter === "all" ? renderEmpty() : renderEmptyFilter())));
+    listEl.querySelectorAll(".mute-session").forEach(function(btn) {
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        setSessionMuted(this.dataset.key, this.dataset.muted !== "1");
+      });
+    });
+    var countEl = document.getElementById("stat-count");
+    var countNum = countEl && countEl.querySelector("b");
+    if (countNum) countNum.textContent = String(filtered.length);
+    else if (countEl) countEl.textContent = filtered.length + " 条";
+    notifyResize();
+  }
+
+  function muteKey(record) {
+    if (!record) return "";
+    if (record.type === "channel") {
+      var name = (record.meta && record.meta.channelName) || String(record.source || "").replace(/^#/, "");
+      return name ? "channel:" + name : "";
+    }
+    if (record.type === "conversation") {
+      var source = String(record.source || "").replace(/\\/g, "/").trim().toLowerCase();
+      return source ? "session:" + source : "";
+    }
+    return "";
+  }
+
+  function muteButton(record) {
+    var key = muteKey(record);
+    if (!key) return "";
+    var muted = mutedKeys.indexOf(key) >= 0;
+    return '<button type="button" class="mute-session" data-key="' + escAttr(key) + '" data-muted="' + (muted ? "1" : "0") + '">' + (muted ? "恢复提醒" : "不再提醒") + "</button>";
+  }
+
+  var muteQueue = Promise.resolve();
+  function setSessionMuted(key, muted) {
+    muteQueue = muteQueue.then(function() { return persistSessionMuted(key, muted); });
+    return muteQueue;
+  }
+
+  async function persistSessionMuted(key, muted) {
+    muteRequests++;
+    recordsRevision++;
+    try {
+      var res = await fetch(API + "/mute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: key, muted: muted }),
+      });
+      var data = await res.json();
+      if (!data.ok) throw new Error(data.error || "静音失败");
+      mutedKeys = data.mutedSessionKeys || [];
+      var area = document.querySelector('textarea[data-key="mutedSessionKeys"]');
+      if (area) area.value = mutedKeys.join("\n");
+      applyFilter();
+    } catch (e) {
+      setStatus(e && e.message ? e.message : "静音失败");
+    } finally {
+      muteRequests--;
+    }
+  }
+
+  async function loadRecords(quiet) {
+    var revision = ++recordsRevision;
+    recordsRequests++;
+    if (!quiet && !document.hidden && !pageHidden) setStatus("加载中...");
+    try {
+      var res = await fetch(API + "/records");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      var data = await res.json();
+      if (data.ok === false && !data.storage) throw new Error(data.error || '通知读取失败');
+      if (revision === recordsRevision && !muteRequests && !document.hidden && !pageHidden) {
+        var scroller = document.querySelector('#tab-notifications .main');
+        var scrollTop = scroller ? scroller.scrollTop : 0;
+        recordsError = data.storage && data.storage.ok === false ? (data.storage.error || '存储不可用') : '';
+        allRecords = data.records || [];
+        mutedKeys = data.mutedSessionKeys || [];
+        latestClick = data.latestClick || null;
+        applyFilter();
+        if (scroller) scroller.scrollTop = scrollTop > 48 ? scrollTop : 0;
+      }
+    } catch (e) {
+      if (revision === recordsRevision && !document.hidden && !pageHidden) {
+        recordsError = e && e.message ? e.message : String(e);
+        applyFilter();
+      }
+    } finally {
+      recordsRequests--;
+      if (!quiet && revision === recordsRevision && !document.hidden && !pageHidden) setStatus("");
+    }
+  }
+
+  function refreshRecords() {
+    if (recordsRequests) return;
+    return loadRecords(true);
+  }
+
+  // Settings
+  async function loadSettings() {
+    var formEl = document.getElementById("settings-form");
+    formEl.innerHTML = '<div class="empty"><p class="empty-text">加载设置...</p></div>';
+    try {
+      await loadVisualCatalog();
+      var res = await fetch(API + "/settings");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      var cfg = await res.json();
+      formEl.innerHTML = renderSettingsForm(cfg);
+      pinSelectValues(cfg);
+      bindSettingsEvents();
+      notifyResize();
+    } catch (e) {
+      formEl.innerHTML = '<div class="empty"><p class="empty-text">设置加载失败: ' + esc(e.message) + '</p></div>';
+    }
+  }
+
+  function fieldShell(label, hint, control, span) {
+    return '<div class="field' + (span ? ' span' : '') + '"><div class="field-top"><div class="setting-label">' + esc(label) + '</div><div class="val">' + control + '</div></div>' + (hint ? '<p class="hint">' + esc(hint) + '</p>' : '') + '</div>';
+  }
+
+  function input(key, label, hint, type, value, opts) {
+    if (type === "toggle") {
+      return fieldShell(label, hint, '<div class="toggle' + (value ? ' on' : '') + '" data-key="' + escAttr(key) + '"><div class="knob"></div></div>', false);
+    }
+    if (type === "select") {
+      var options = (opts || []).map(function(o) {
+        return '<option value="' + escAttr(o.value) + '"' + (value === o.value ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+      }).join('');
+      return fieldShell(label, hint, '<div class="select-wrap" data-key="' + escAttr(key) + '"><select>' + options + '</select></div>', false);
+    }
+    if (type === "textarea") {
+      return fieldShell(label, hint, '<textarea class="setting-input" data-key="' + escAttr(key) + '">' + esc(value || '') + '</textarea>', true);
+    }
+    if (type === "text") {
+      return fieldShell(label, hint, '<input class="setting-input" type="text" data-key="' + escAttr(key) + '" value="' + escAttr(value || '') + '">', false);
+    }
+    if (type === "soundPath") {
+      var target = opts && opts.target ? opts.target : "status";
+      return fieldShell(label, hint, '<div class="pathline"><input class="setting-input" type="text" data-key="' + escAttr(key) + '" value="' + escAttr(value || '') + '"><button type="button" class="sound-picker" data-key="' + escAttr(key) + '" data-target="' + escAttr(target) + '">选择</button></div>', true);
+    }
+    if (type === "range") {
+      var min = opts && opts.min != null ? Number(opts.min) : 0;
+      var max = opts && opts.max != null ? Number(opts.max) : 3;
+      var step = opts && opts.step != null ? Number(opts.step) : 0.1;
+      var num = Number(value);
+      if (!Number.isFinite(num)) num = opts && opts.defaultValue != null ? Number(opts.defaultValue) : 1;
+      num = Math.min(max, Math.max(min, Math.round(num * 100) / 100));
+      return fieldShell(label, hint, '<div class="range-wrap" data-key="' + escAttr(key) + '"><input type="range" min="' + escAttr(min) + '" max="' + escAttr(max) + '" step="' + escAttr(step) + '" value="' + escAttr(num) + '"><input class="setting-input track-num" type="number" min="' + escAttr(min) + '" max="' + escAttr(max) + '" step="' + escAttr(step) + '" value="' + escAttr(num) + '"></div>', false);
+    }
+    return '';
+  }
+
+  function optionList(group) {
+    return (EFFECT_OPTIONS[group] || []).map(function(o) { return { value: o.id, label: o.label }; });
+  }
+
+  function renderSettingsForm(cfg) {
+    var groups = [];
+    function pushGroup(no, name, body) { groups.push({ no: no, name: name, body: body }); }
+      pushGroup("01", "通知方式", ''
+      + input('notificationDisplayMode', '显示方式', '选择通知出现在哪里：自定义弹窗，或只记录到通知中心。', 'select', cfg.notificationDisplayMode === 'off' ? 'off' : 'custom', [
+        { value: 'custom', label: '自定义弹窗' },
+        { value: 'off', label: '仅记录到列表' },
+      ])
+      + input('enableConversationNotification', '对话结束通知', 'Agent 回复完成时弹窗', 'toggle', cfg.enableConversationNotification)
+      + input('enableConversationMerge', '六十秒合并', '同一会话 60 秒内的连续回复在列表里合成一行。每一条仍然弹窗、仍然出声。关闭后各自占一行。', 'toggle', cfg.enableConversationMerge !== false)
+      + input('enableChannelNotification', '频道消息通知', '频道里有新消息时弹窗', 'toggle', cfg.enableChannelNotification)
+      + input('enableStatusNotifications', '状态监控通知', 'Hana 转发来的状态通知。不控制错误和任务完成。', 'toggle', cfg.enableStatusNotifications)
+      + input('enableErrorNotifications', '错误/失败通知', '运行异常或失败时弹窗。', 'toggle', cfg.enableErrorNotifications)
+      + input('enableTaskDoneNotifications', '任务完成通知', '后台任务或定时任务完成时弹窗，默认关闭避免刷屏。', 'toggle', cfg.enableTaskDoneNotifications)
+      + input('clickAction', '点击后高亮', '点击弹窗后，通知页高亮对应一条。关闭后点击只关闭弹窗。保存后立即生效。', 'toggle', cfg.clickAction !== false));
+      pushGroup("02", "免打扰", ''
+      + input('quietHoursEnabled', '免打扰时段', '开启后，在下面的时间里不弹窗。通知仍留在列表里。开始和结束相同则不生效，可以跨过午夜。', 'toggle', cfg.quietHoursEnabled === true)
+      + input('quietHoursStart', '开始', '24 小时制，例如 23:00。', 'text', cfg.quietHoursStart || '23:00')
+      + input('quietHoursEnd', '结束', '到达这一分钟时恢复弹窗。', 'text', cfg.quietHoursEnd || '07:00')
+      + input('mutedSessionKeys', '已静音的会话', '已静音的会话不再弹窗，也不出声，列表里仍保留。一行一个，会话写成 session:路径，频道写成 channel:频道名。', 'textarea', cfg.mutedSessionKeys || ''));
+      pushGroup("03", "提示音", ''
+      + input('conversationNotificationSoundTheme', '聊天提示音', '聊天通知使用的提示音。选择“静音”即可关闭聊天提示音。', 'select', cfg.conversationNotificationSoundTheme, optionList('soundThemes'))
+      + input('conversationCustomNotificationSoundPath', '聊天自定义声音', '聊天提示音选择“自定义声音”时使用。支持 wav、mp3、m4a、aac、wma。', 'soundPath', cfg.conversationCustomNotificationSoundPath, { target: 'conversation' })
+      + input('channelNotificationSoundTheme', '频道提示音', '频道通知使用的提示音。选择“静音”即可关闭频道提示音。', 'select', cfg.channelNotificationSoundTheme, optionList('soundThemes'))
+      + input('channelCustomNotificationSoundPath', '频道自定义声音', '频道提示音选择“自定义声音”时使用。支持 wav、mp3、m4a、aac、wma。', 'soundPath', cfg.channelCustomNotificationSoundPath, { target: 'channel' })
+      + input('importantNotificationSoundTheme', '重要通知提示音', '重要通知使用的提示音。选自定义声音后使用下面的文件。选静音则重要通知不出声。', 'select', cfg.importantNotificationSoundTheme, optionList('soundThemes'))
+      + input('importantCustomNotificationSoundPath', '重要通知自定义声音', '重要通知提示音选择自定义声音时使用。支持 wav、mp3、m4a、aac、wma。', 'soundPath', cfg.importantCustomNotificationSoundPath, { target: 'important' })
+      + input('notificationSoundTheme', '状态/兜底提示音', '状态、错误和其他未分来源通知使用的提示音，也作为旧配置兜底。', 'select', cfg.notificationSoundTheme, optionList('soundThemes'))
+      + input('customNotificationSoundPath', '状态/兜底自定义声音', '状态/兜底提示音选择“自定义声音”时使用；聊天/频道未填路径时也会继承它。', 'soundPath', cfg.customNotificationSoundPath, { target: 'status' }));
+      pushGroup("04", "视觉组合包", ''
+      + input('visualComboPack', '组合包', '一键套用弹窗风格、登场效果、粒子形状、粒子轨迹、物理手感、弹窗配色和面板主题。选自定义可手动微调。', 'select', cfg.visualComboPack, optionList('visualComboPacks')));
+      pushGroup("05", "弹窗卡片", ''
+      + input('toastLayout', '布局', '控制头像、标题、正文、角色名和标签的排版结构。', 'select', cfg.toastLayout, optionList('toastLayouts'))
+      + input('toastStyle', '卡片风格', '右下角自定义弹窗的卡片外观。', 'select', cfg.toastStyle, optionList('toastStyles'))
+      + input('sakuraTheme', '弹窗配色', '选择弹窗与退场粒子的颜色。自动会按 Agent 选专属配色。', 'select', cfg.sakuraTheme, optionList('sakuraThemes'))
+      + input('toastScale', '整体大小', '等比例缩放整张弹窗，文字、头像、间距会一起变小或变大。1.0 为原始大小。', 'range', cfg.toastScale, { min: 0.7, max: 1.2, step: 0.05, defaultValue: 1.0 })
+      + input('toastOffsetX', '水平偏移', '负数向左，正数向右。允许把弹窗推到屏幕工作区之外。', 'range', cfg.toastOffsetX, { min: -1600, max: 1600, step: 10, defaultValue: 0 })
+      + input('toastOffsetY', '垂直偏移', '负数向上，正数向下。允许把弹窗推到屏幕工作区之外。', 'range', cfg.toastOffsetY, { min: -1000, max: 1000, step: 10, defaultValue: 0 }));
+      pushGroup("06", "弹窗动效", ''
+      + input('cardExitMode', '退场方式', '滑回右侧时沿入场反方向离开，不往右上飞。直接消失不移动卡片。组合包不会改这一项。', 'select', cfg.cardExitMode || 'trajectory', [
+        { value: 'trajectory', label: '滑回右侧' },
+        { value: 'instant', label: '直接消失' },
+      ])
+      + input('cardExitFade', '退场淡化', '关闭后卡片保持不透明，到点直接收掉，不再渐渐变淡。组合包不会改这一项。', 'toggle', cfg.cardExitFade !== false)
+      + input('toastTransportMode', '舞动风格', '只控制弹窗运动与编队方式：群舞弹簧保留共享栈物理，独奏轻弹让每张卡片独立运动。', 'select', cfg.toastTransportMode, optionList('toastTransportModes'))
+      + input('entranceVisual', '登场效果', '只控制弹窗进入时的视觉效果，不改变窗体运动。', 'select', cfg.entranceVisual, optionList('entranceVisuals'))
+      + input('physicsPreset', '物理手感', '控制弹窗进入和堆叠补位的弹簧手感。', 'select', cfg.physicsPreset, optionList('physicsPresets')));
+      pushGroup("07", "粒子退场", ''
+      + input('sakuraEnabled', '粒子退场', '关闭后不释放粒子。卡片仍按退场方式收掉。保存后立即生效。', 'toggle', cfg.sakuraEnabled !== false)
+      + input('particleShape', '粒子形状', '弹窗退场时释放的粒子形状。关闭粒子退场后，这个形状不会被放出来。', 'select', cfg.particleShape, optionList('particleShapes'))
+      + input('autoDismissMotion', '自动粒子轨迹', '自动消失时粒子走的轨迹。不移动卡片。', 'select', cfg.autoDismissMotion, optionList('autoDismissMotions'))
+      + input('manualDismissMotion', '手动粒子轨迹', '点击关闭时粒子走的轨迹。不移动卡片。', 'select', cfg.manualDismissMotion, optionList('manualDismissMotions'))
+      + input('autoParticleCountScale', '自动粒子数量', '自动消失时释放的粒子数量倍率。1.0 为标准，数值越大越密。', 'range', cfg.autoParticleCountScale, { min: 0.2, max: 4.0, step: 0.1, defaultValue: 1.0 })
+      + input('manualParticleCountScale', '手动粒子数量', '手动关闭或点击退场时释放的粒子数量倍率。', 'range', cfg.manualParticleCountScale, { min: 0.2, max: 4.0, step: 0.1, defaultValue: 1.0 })
+      + input('particleSizeScale', '粒子大小', '统一调节退场粒子的绘制大小。', 'range', cfg.particleSizeScale, { min: 0.5, max: 3.0, step: 0.1, defaultValue: 1.0 })
+      + input('particleIntervalEffect', '粒子间隔', '调节粒子出现的时间间隔。0 为原始瞬爆，数值越大越像连续喷涌/星雨。', 'range', cfg.particleIntervalEffect, { min: 0, max: 100, step: 1, defaultValue: 0 }));
+      pushGroup("08", "通知中心面板", ''
+      + input('panelTheme', '面板主题', '通知中心这一页的主题。自动时跟随界面深浅。读不到界面主题时，才用组合包的面板主题。', 'select', cfg.panelTheme, optionList('panelThemes'))
+      + input('notificationWidgetDensity', '显示密度', '控制通知中心面板的整体字号，当前“宽松大字”作为最小档。', 'select', cfg.notificationWidgetDensity, [
+        { value: 'spacious', label: '宽松大字' },
+        { value: 'large', label: '超大醒目' },
+        { value: 'huge', label: '巨幕阅读' },
+      ])
+      + input('notificationCenterLimit', '列表显示条数', '通知中心最多显示多少条。文件里仍保留最近 200 条，这里不能超过 200。', 'range', cfg.notificationCenterLimit, { min: 10, max: 200, step: 10, defaultValue: 30 })
+      + input('notificationWidgetSourceTint', '按来源染色', '聊天、频道、状态通知使用不同色系。', 'toggle', cfg.notificationWidgetSourceTint));
+      pushGroup("09", "频道聚合", ''
+      + input('enableChannelAggregation', '频道聚合摘要', '短时间多条普通频道消息合并为一条。重要通知会立即弹出，不参与聚合。', 'toggle', cfg.enableChannelAggregation)
+      + input('channelAggregationWindowSeconds', '聚合窗口秒数', '在多少秒内累计频道普通消息。少于阈值时到点会按原消息逐条发出。', 'range', cfg.channelAggregationWindowSeconds, { min: 5, max: 300, step: 5, defaultValue: 30 })
+      + input('channelAggregationThreshold', '聚合触发条数', '窗口内达到多少条普通频道消息后立刻合并为摘要。', 'range', cfg.channelAggregationThreshold, { min: 2, max: 50, step: 1, defaultValue: 4 }));
+      pushGroup("10", "重要通知规则", ''
+      + input('enableKeywordImportance', '启用关键词重要通知', '命中关键词的通知升格为重要。', 'toggle', cfg.enableKeywordImportance)
+      + input('notificationKeywords', '重要关键词', '用逗号或换行分隔。命中这些词的通知会标记为重要。', 'textarea', cfg.notificationKeywords));
+    var catalog = '<ol class="catalog">' + groups.map(function (g, i) {
+      return '<li><button type="button" class="group-nav' + (i === 0 ? ' is-on' : '') + '" data-group="' + g.no + '"><span class="idx">' + g.no + '</span><span class="gname">' + esc(g.name) + '</span></button></li>';
+    }).join('') + '</ol>';
+    var detail = '<div class="groups">' + groups.map(function (g, i) {
+      return '<section class="setting-group' + (i === 0 ? ' is-open' : '') + '" data-group="' + g.no + '"><header class="detail-head"><span class="idx">' + g.no + '</span><h2>' + esc(g.name) + '</h2></header><div class="fields">' + g.body + '</div></section>';
+    }).join('') + '</div>';
+    var dock = '<div class="dock-wrap"><div class="dock">'
+      + '<button type="button" id="btn-save-settings">保存</button>'
+      + '<button type="button" class="burst-preview" data-test-type="conversation" data-count="1">对话 1</button>'
+      + '<button type="button" class="burst-preview" data-test-type="conversation" data-count="5">对话 5 连发</button>'
+      + '<button type="button" class="burst-preview" data-test-type="conversation" data-count="10">对话 10 连发</button>'
+      + '<button type="button" class="burst-preview" data-test-type="channel" data-count="1">频道通知</button>'
+      + '<button type="button" class="burst-preview" data-test-type="channel-aggregate" data-count="1">频道摘要</button>'
+      + '<button type="button" class="burst-preview" data-test-type="status" data-count="1">状态通知</button>'
+      + '<button type="button" class="burst-preview" data-test-type="error" data-count="1">错误通知</button>'
+      + '<button type="button" class="burst-preview" data-test-type="task-done" data-count="1">任务完成</button>'
+      + '<p class="caption">预览会试弹窗，不打开聊天。</p>'
+      + '<div class="save-feedback" id="save-feedback"></div>'
+      + '</div></div>';
+    return '<div class="settings-layout">' + catalog + detail + '</div>' + dock;
+  }
+
+  function bindSettingsEvents() {
+    // Toggles
+    document.querySelectorAll('.toggle').forEach(function(el) {
+      el.addEventListener('click', function() {
+        this.classList.toggle('on');
+      });
+    });
+    document.querySelectorAll('.group-nav').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var id = this.getAttribute('data-group');
+        document.querySelectorAll('.group-nav').forEach(function(b) {
+          b.classList.toggle('is-on', b.getAttribute('data-group') === id);
+        });
+        document.querySelectorAll('.setting-group').forEach(function(g) {
+          var open = g.getAttribute('data-group') === id;
+          g.classList.toggle('is-open', open);
+          if (open) applyPinnedSelects(g);
+        });
+      });
+    });
+    document.querySelectorAll('.select-wrap select').forEach(function(el) {
+      el.addEventListener('change', function() {
+        var wrap = this.closest('.select-wrap');
+        if (wrap) wrap.dataset.value = this.value;
+      });
+    });
+    document.querySelectorAll('.range-wrap').forEach(function(parent) {
+      var rangeInput = parent.querySelector('input[type="range"]');
+      var numberInput = parent.querySelector('input[type="number"]');
+      function syncFrom(src, dst) {
+        var min = Number(src.min);
+        var max = Number(src.max);
+        var value = Number(src.value);
+        if (!Number.isFinite(value)) value = 1;
+        value = Math.min(max, Math.max(min, Math.round(value * 100) / 100));
+        src.value = String(value);
+        dst.value = String(value);
+      }
+      rangeInput.addEventListener('input', function() { syncFrom(rangeInput, numberInput); });
+      numberInput.addEventListener('input', function() { syncFrom(numberInput, rangeInput); });
+    });
+
+    function setFieldValue(key, value) {
+      var toggle = document.querySelector('.toggle[data-key="' + key + '"]');
+      if (toggle) { toggle.classList.toggle('on', value === true); return; }
+      var selectWrap = document.querySelector('.select-wrap[data-key="' + key + '"]');
+      if (selectWrap) {
+        var next = String(value);
+        selectWrap.dataset.value = next;
+        var select = selectWrap.querySelector('select');
+        if (select) select.value = next;
+        return;
+      }
+      var textInput = document.querySelector('input.setting-input[type="text"][data-key="' + key + '"]');
+      if (textInput) {
+        textInput.value = String(value == null ? '' : value);
+        return;
+      }
+      var textArea = document.querySelector('textarea.setting-input[data-key="' + key + '"]');
+      if (textArea) {
+        textArea.value = String(value == null ? '' : value);
+        return;
+      }
+      var rangeWrap = document.querySelector('.range-wrap[data-key="' + key + '"]');
+      if (rangeWrap) {
+        var range = rangeWrap.querySelector('input[type="range"]');
+        var number = rangeWrap.querySelector('input[type="number"]');
+        var text = String(value);
+        if (range) range.value = text;
+        if (number) number.value = text;
+      }
+    }
+
+    function soundThemeKeyForPathKey(key) {
+      if (key === 'conversationCustomNotificationSoundPath') return 'conversationNotificationSoundTheme';
+      if (key === 'channelCustomNotificationSoundPath') return 'channelNotificationSoundTheme';
+      if (key === 'importantCustomNotificationSoundPath') return 'importantNotificationSoundTheme';
+      if (key === 'customNotificationSoundPath') return 'notificationSoundTheme';
+      return '';
+    }
+
+    function applyVisualComboPackToForm(packId) {
+      var pack = VISUAL_COMBO_PACKS && VISUAL_COMBO_PACKS[packId];
+      if (!pack || !pack.fields) return;
+      Object.keys(pack.fields).forEach(function(key) {
+        setFieldValue(key, pack.fields[key]);
+      });
+    }
+
+    var comboSelect = document.querySelector('.select-wrap[data-key="visualComboPack"] select');
+    if (comboSelect) {
+      comboSelect.addEventListener('change', function() {
+        applyVisualComboPackToForm(this.value);
+      });
+    }
+
+    function collectSettingsPayload() {
+      var payload = {};
+      document.querySelectorAll('.toggle').forEach(function(el) {
+        payload[el.dataset.key] = el.classList.contains('on');
+      });
+      document.querySelectorAll('.select-wrap select').forEach(function(el) {
+        var parent = el.closest('.select-wrap');
+        payload[parent.dataset.key] = parent.dataset.value || el.value;
+      });
+      document.querySelectorAll('textarea[data-key], input.setting-input[type="text"][data-key]').forEach(function(el) {
+        payload[el.dataset.key] = el.value;
+      });
+      document.querySelectorAll('.range-wrap').forEach(function(parent) {
+        var numberInput = parent.querySelector('input[type="number"]');
+        payload[parent.dataset.key] = Number(numberInput && numberInput.value);
+      });
+      return payload;
+    }
+
+    document.querySelectorAll('.sound-picker').forEach(function(btn) {
+      btn.addEventListener('click', async function(e) {
+        e.preventDefault();
+        var key = this.dataset.key;
+        var target = this.dataset.target || 'status';
+        var input = document.querySelector('input.setting-input[type="text"][data-key="' + key + '"]');
+        var feedbackEl = document.getElementById('save-feedback');
+        if (feedbackEl) {
+          feedbackEl.className = 'save-feedback show';
+          feedbackEl.textContent = '打开 Windows 声音文件选择器...';
+        }
+        try {
+          var res = await fetch(API + '/pick-sound', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target, currentPath: input ? input.value : '' }),
+          });
+          var data = await res.json();
+          if (data.ok && data.cancelled) {
+            if (feedbackEl) {
+              feedbackEl.className = 'save-feedback show';
+              feedbackEl.textContent = '已取消选择';
+            }
+            return;
+          }
+          if (data.ok && data.path) {
+            setFieldValue(key, data.path);
+            var themeKey = soundThemeKeyForPathKey(key);
+            if (themeKey) setFieldValue(themeKey, 'custom');
+            if (feedbackEl) {
+              feedbackEl.className = 'save-feedback show success';
+              feedbackEl.textContent = '✅ 已选择声音文件，记得保存设置';
+            }
+          } else if (feedbackEl) {
+            feedbackEl.className = 'save-feedback show error';
+            feedbackEl.textContent = '❌ 选择失败: ' + (data.error || 'unknown');
+          }
+        } catch (err) {
+          if (feedbackEl) {
+            feedbackEl.className = 'save-feedback show error';
+            feedbackEl.textContent = '❌ 选择失败: ' + err.message;
+          }
+        }
+      });
+    });
+
+    // Save
+    document.getElementById('btn-save-settings').addEventListener('click', async function() {
+      var saveButton = this;
+      saveButton.disabled = true;
+      var feedbackEl = document.getElementById('save-feedback');
+      feedbackEl.className = 'save-feedback show';
+      feedbackEl.textContent = '保存中...';
+      try {
+        var payload = collectSettingsPayload();
+        var res = await fetch(API + '/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        var data = await res.json();
+        if (data.ok) {
+          feedbackEl.className = 'save-feedback show success';
+          feedbackEl.textContent = '✅ 设置已保存';
+          if (data.settings) {
+            Object.keys(data.settings).forEach(function(key) { setFieldValue(key, data.settings[key]); });
+            applyWidgetAppearance(data.settings);
+          }
+          await loadRecords(true);
+        } else {
+          feedbackEl.className = 'save-feedback show error';
+          feedbackEl.textContent = '❌ 保存失败: ' + (data.error || 'unknown');
+        }
+      } catch (e) {
+        feedbackEl.className = 'save-feedback show error';
+        feedbackEl.textContent = '❌ 网络错误: ' + e.message;
+      } finally { saveButton.disabled = false; }
+    });
+
+
+    window.previewNotification = async function(count, testType) {
+      count = Math.max(1, Math.min(10, Number(count || 1)));
+      testType = testType || 'conversation';
+      var labels = {
+        conversation: '对话',
+        channel: '频道',
+        'channel-aggregate': '频道摘要',
+        status: '状态',
+        error: '错误',
+        'task-done': '任务完成',
+      };
+      var previewLabel = labels[testType] || '视觉';
+      var feedbackEl = document.getElementById('save-feedback');
+      if (!feedbackEl) return;
+      feedbackEl.className = 'save-feedback show';
+      feedbackEl.textContent = count > 1 ? ('瞬发 ' + count + ' 条' + previewLabel + '预览中...') : ('生成' + previewLabel + '预览中...');
+      try {
+        var payload = collectSettingsPayload();
+        payload.preview = true;
+        payload.count = count;
+        payload.testType = testType;
+        var res = await fetch(API + '/test-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        var data = await res.json();
+        if (data.ok && data.displayed === true) {
+          feedbackEl.className = 'save-feedback show success';
+          feedbackEl.textContent = '✅ ' + (data.message || '预览弹窗已显示');
+        } else if (data.status === 'suppressed') {
+          feedbackEl.className = 'save-feedback show';
+          feedbackEl.textContent = data.message || '当前设置阻止了测试弹窗';
+        } else {
+          feedbackEl.className = 'save-feedback show error';
+          feedbackEl.textContent = '❌ 预览失败: ' + (data.error || 'unknown');
+        }
+      } catch (e) {
+        feedbackEl.className = 'save-feedback show error';
+        feedbackEl.textContent = '❌ 网络错误: ' + e.message;
+      }
+    };
+
+    document.querySelectorAll('.burst-preview').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        window.previewNotification(this.dataset.count || 1, this.dataset.testType || 'conversation');
+      });
+    });
+  }
+
+  function resolvePanelThemeClient(value, visualComboPack) {
+    var requested = String(value || 'auto');
+    if (requested && requested !== 'auto') return requested;
+    var pack = VISUAL_COMBO_PACKS && VISUAL_COMBO_PACKS[visualComboPack || 'custom'];
+    return pack && pack.fields && pack.fields.panelTheme ? pack.fields.panelTheme : 'classic';
+  }
+
+  function pinSelectValues(cfg) {
+    document.querySelectorAll('.select-wrap').forEach(function(wrap) {
+      var key = wrap.dataset.key;
+      if (!key || !cfg || !Object.prototype.hasOwnProperty.call(cfg, key)) return;
+      var value = cfg[key] == null ? '' : String(cfg[key]);
+      wrap.dataset.value = value;
+      var select = wrap.querySelector('select');
+      if (select) select.value = value;
+    });
+  }
+
+  function applyPinnedSelects(root) {
+    (root || document).querySelectorAll('.select-wrap').forEach(function(wrap) {
+      if (!wrap.dataset.value) return;
+      var select = wrap.querySelector('select');
+      if (select) select.value = wrap.dataset.value;
+    });
+  }
+
+  function paintSavedPanelTheme(themeId, followHost) {
+    var root = document.documentElement;
+    var names = ['--bg', '--surface', '--ink', '--muted', '--accent', '--on-accent'];
+    var paintFn = window.NotificationHubWidgetAppearance && window.NotificationHubWidgetAppearance.panelThemePaint;
+    var colors = paintFn ? paintFn(themeId, followHost) : null;
+    if (!colors) {
+      names.forEach(function(name) { root.style.removeProperty(name); });
+      return;
+    }
+    root.style.setProperty('--bg', colors.bg);
+    root.style.setProperty('--surface', colors.surface);
+    root.style.setProperty('--ink', colors.ink);
+    root.style.setProperty('--muted', colors.muted);
+    root.style.setProperty('--accent', colors.accent);
+    root.style.setProperty('--on-accent', colors.onAccent);
+  }
+
+  function panelThemeBaseModeClient(panelTheme) {
+    var hints = window.NotificationHubWidgetAppearance && window.NotificationHubWidgetAppearance.darkPanelThemes;
+    return hints && hints.indexOf(panelTheme) >= 0 ? "dark" : "light";
+  }
+
+  function panelThemeLabelClient(panelTheme) {
+    var found = (EFFECT_OPTIONS.panelThemes || []).find(function(o) { return o.id === panelTheme; });
+    if (found) return found.label;
+    var labels = window.NotificationHubWidgetAppearance && window.NotificationHubWidgetAppearance.panelThemeLabels;
+    return (labels && labels[panelTheme]) || panelTheme || '经典柔和';
+  }
+
+  function applyWidgetAppearance(cfg) {
+    window.__nhLastSettings = cfg || {};
+    var requested = String((cfg && cfg.panelTheme) || "auto");
+    var resolvedPanel = resolvePanelThemeClient(requested, cfg && cfg.visualComboPack);
+    var density = ['spacious', 'large', 'huge'].includes(cfg && cfg.notificationWidgetDensity) ? cfg.notificationWidgetDensity : 'spacious';
+    var frame = window.NotificationHubWidgetAppearance
+      ? window.NotificationHubWidgetAppearance.describeWidgetFrame({
+          requestedPanelTheme: requested,
+          resolvedPanelTheme: resolvedPanel,
+          resolvedPanelLabel: panelThemeLabelClient(resolvedPanel),
+          hostAppearance: hostAppearanceLive,
+          density: density,
+          sourceTint: cfg && cfg.notificationWidgetSourceTint === true,
+        })
+      : null;
+    if (!frame) {
+      var followHost = requested === "auto" && !!hostAppearanceLive;
+      var panelTheme = followHost ? "auto" : resolvedPanel;
+      var theme = followHost ? hostAppearanceLive : panelThemeBaseModeClient(panelTheme);
+      frame = {
+        className: 'theme-' + theme + ' panel-theme-' + panelTheme + ' density-' + density + ' preset-warm-paper ' + ((cfg && cfg.notificationWidgetSourceTint === true) ? 'source-tint-on' : 'source-tint-off') + (hostAppearanceLive ? ' host-frame' : ''),
+        subtitle: (followHost ? ('跟随界面 · ' + (hostAppearanceLive === 'dark' ? '深色' : '浅色')) : panelThemeLabelClient(panelTheme)) + ' · ' + (density === 'spacious' ? '大字' : density === 'large' ? '超大' : '巨幕'),
+        panelTheme: panelTheme,
+        followHost: followHost,
+      };
+    }
+    document.documentElement.className = frame.className;
+    document.documentElement.style.colorScheme = frame.className.indexOf('theme-dark') >= 0 ? 'dark' : 'light';
+    paintSavedPanelTheme(frame.panelTheme, frame.followHost);
+    var subtitle = document.getElementById('subtitle');
+    if (subtitle) subtitle.textContent = frame.subtitle;
+    if (typeof applyFilter === 'function') applyFilter();
+    notifyResize();
+    placeTabMark();
+  }
+
+  function placeTabMark() {
+    var bar = document.getElementById('tab-bar');
+    if (!bar) return;
+    var mark = bar.querySelector('.tabs-mark');
+    var tab = bar.querySelector('.tab.active');
+    if (!mark || !tab) return;
+    mark.style.width = tab.offsetWidth + 'px';
+    mark.style.transform = 'translateX(' + tab.offsetLeft + 'px)';
+  }
+
+  // Tab switching
+  document.querySelectorAll('.tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(tc) { tc.classList.remove('active'); });
+      this.classList.add('active');
+      var tabId = this.dataset.tab;
+      document.getElementById('tab-' + tabId).classList.add('active');
+      var tools = document.getElementById('mast-tools');
+      if (tools) tools.hidden = tabId !== 'notifications';
+      if (tabId === 'settings') loadSettings();
+      placeTabMark();
+      notifyResize();
+    });
+  });
+
+  // Filter pills
+  document.getElementById('filter-bar').addEventListener('click', function(e) {
+    var pill = e.target.closest('.pill[data-filter]');
+    if (!pill) return;
+    document.querySelectorAll('.pill[data-filter]').forEach(function(p) { p.classList.remove('active'); });
+    pill.classList.add('active');
+    currentFilter = pill.dataset.filter;
+    applyFilter();
+  });
+
+  // Refresh
+  document.getElementById('btn-refresh').addEventListener('click', function() {
+    loadRecords();
+  });
+
+  // Clear
+  document.getElementById('btn-clear').addEventListener('click', async function() {
+    setStatus("清空...");
+    try {
+      var res = await fetch(API + '/clear', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) });
+      var result = await res.json();
+      if (!res.ok || !result.ok) throw new Error(result.error || '清空失败');
+      await loadRecords();
+      setStatus("");
+    } catch (e) { setStatus('清空失败: ' + e.message); }
+  });
+
+  // Init
+  loadRecords();
+  setInterval(refreshRecords, 4000);
+  document.addEventListener('visibilitychange', function() { loadRecords(true); });
+  Promise.all([
+    loadVisualCatalog().catch(function() { return null; }),
+    fetch(API + "/settings").then(function(res) {
+      return res.ok ? res.json() : null;
+    }).catch(function() { return null; }),
+  ]).then(function(pair) {
+    if (pair[1]) applyWidgetAppearance(pair[1]);
+  });
+  parent.postMessage({ type: "ready" }, "*");
+  placeTabMark();
+  requestAnimationFrame(function() {
+    var bar = document.getElementById('tab-bar');
+    if (bar) bar.classList.add('is-ready');
+    placeTabMark();
+  });
+  window.addEventListener('resize', placeTabMark);
+
+  if (window.ResizeObserver) {
+    new ResizeObserver(notifyResize).observe(document.body);
+  }
+})();
+</script>
+<script type="module" src="./host-follow.js"></script>
+</body>
+</html>

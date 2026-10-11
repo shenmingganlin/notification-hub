@@ -4,7 +4,8 @@
  * 测试工具：按 notificationDisplayMode 发送一条测试通知。
  */
 
-import { normalizeSettings, sanitizeVisualPreviewPayload } from "../lib/notification-config.js";
+import { readHostConfig } from "../lib/host-config.js";
+import { isQuietHours, normalizeSettings, sanitizeVisualPreviewPayload } from "../lib/notification-config.js";
 
 export const name = "test-notify";
 export const description = "发送一条测试通知，遵守通知显示方式设置";
@@ -16,25 +17,14 @@ export const parameters = {
   },
 };
 
-function readConfig(ctx) {
-  const config = ctx?.config;
-  try {
-    if (config?.getAll) return config.getAll() || {};
-    if (config?.get) return config.get() || {};
-  } catch (err) {
-    ctx?.log?.warn?.("notification-hub test-notify read config failed:", err?.message || err);
-  }
-  return config && typeof config === "object" ? config : {};
-}
-
 export async function execute(input, ctx) {
-  const { bus, log } = ctx;
+  const { log } = ctx;
   const message = input.message || "这是一条测试通知";
-  const rawConfig = readConfig(ctx);
-  const config = normalizeSettings(rawConfig);
-  const displayMode = config.notificationDisplayMode;
-
   try {
+    const rawConfig = await readHostConfig(ctx);
+    const config = normalizeSettings(rawConfig);
+    const displayMode = config.notificationDisplayMode;
+    if (isQuietHours(config)) return { content: [{ type: "text", text: "免打扰开着，测试没有弹窗" }], details: { displayed: false, status: "suppressed" } };
     const notification = {
       type: "conversation",
       title: "测试通知",
@@ -44,32 +34,36 @@ export async function execute(input, ctx) {
       emoji: "🌸",
       primary: "#9b59b6",
       accent: "#e74c3c",
-      sound: displayMode === "custom" || displayMode === "native",
+      sound: displayMode === "custom",
       soundTheme: config.conversationNotificationSoundTheme,
       customSoundPath: config.conversationCustomNotificationSoundPath || config.customNotificationSoundPath,
       ...sanitizeVisualPreviewPayload(rawConfig),
     };
 
-    if (displayMode === "custom") {
-      // Prefer the public plugin entrypoint so this tool does not depend on
-      // private decoration/refresh method signatures.
-      if (ctx._notificationHubPlugin?.showCustomToast) {
-        ctx._notificationHubPlugin.showCustomToast(notification);
-      } else if (ctx._customToast) {
-        ctx._customToast.show(notification);
-      } else {
-        // 回退：手动发到通知总线
-        bus.emit({ type: "notification", title: "🌸 测试通知", body: message, agentId: "hanako" }, null);
-      }
-    } else if (displayMode === "native") {
-      bus.emit({ type: "notification", title: "🌸 测试通知", body: message, agentId: "hanako" }, null);
-    } else {
+    if (displayMode === "off") {
       log.info("test notification popup suppressed by mode=off");
+      return { content: [{ type: "text", text: `当前是只记录，测试没有弹窗（mode=${displayMode}）` }] };
     }
 
-    log.info(`test notification sent: ${message} mode=${displayMode}`);
-    return { content: [{ type: "text", text: `测试通知已发送：${message}（mode=${displayMode}）` }] };
+    // Prefer the public plugin entrypoint so this tool does not depend on
+    // private decoration/refresh method signatures.
+    let result;
+    if (ctx._notificationHubPlugin?.showCustomToast) {
+      result = await ctx._notificationHubPlugin.showCustomToast(notification, { confirmDisplay: true });
+    } else if (ctx._customToast?.showConfirmed) {
+      result = await ctx._customToast.showConfirmed(notification);
+    } else {
+      return { content: [{ type: "text", text: "发送失败：自定义弹窗入口不可用" }] };
+    }
+
+    if (result?.status !== "shown") return {
+      content: [{ type: "text", text: `测试未确认显示：${result?.error || result?.status || "确认入口未返回结果"}（mode=${displayMode}）；未重发` }],
+      isError: result?.status !== "suppressed",
+      details: { displayed: false, status: result?.status || "failed" },
+    };
+    log.info(`test notification displayed: ${message} mode=${displayMode}`);
+    return { content: [{ type: "text", text: `测试通知已显示：${message}（mode=${displayMode}）` }], details: { displayed: true, status: "shown" } };
   } catch (err) {
-    return { content: [{ type: "text", text: `发送失败: ${err.message}` }] };
+    return { content: [{ type: "text", text: `发送失败: ${err.message}` }], isError: true, details: { displayed: false, status: "failed" } };
   }
 }

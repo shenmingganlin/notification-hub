@@ -8,11 +8,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { AgentResolver } from "./lib/agent-resolver.js";
 import { NotificationStore } from "./lib/notification-store.js";
+import { createNotificationHubApi, normalizeExternalNotification } from "./lib/notification-api.js";
 import { CustomToast } from "./lib/custom-toast.js";
 import {
   buildRuntimeConfig,
   intValue,
-  normalizeDismissEffect,
   normalizeDismissMotionTrack,
   normalizeDisplayMode,
   normalizeEntranceVisual,
@@ -23,6 +23,32 @@ import {
   normalizeToastTransportMode,
   numberValue,
 } from "./lib/notification-config.js";
+import { readHostConfig } from "./lib/host-config.js";
+import {
+  clearChannelAggregation,
+  drainChannelAggregation,
+  flushChannelAggregation,
+  handleChannelMessage,
+  maybeAggregateChannelNotification,
+  resolveChannel,
+} from "./lib/channel-aggregation.js";
+import {
+  getSessionTitle,
+  handleConversationEnd,
+  prewarmSessionInfo,
+  resolveAgentFromSession,
+} from "./lib/conversation-notification.js";
+import {
+  handleStatusEvent,
+  pushStatusNotification,
+  truncateStatusText,
+} from "./lib/status-notification.js";
+import {
+  emitDecoratedDesktopNotification,
+  emitDesktopNotification,
+  popupBlockReason,
+  recordAndEmit,
+} from "./lib/notification-delivery.js";
 import {
   decorateToastNotification,
   normalizeHexColor,
@@ -40,6 +66,21 @@ import {
 } from "./lib/policy/notification-policy.js";
 
 export default class NotificationHubPlugin {
+  register(disposer) {
+    if (typeof disposer !== "function") return;
+    if (!this._disposers) this._disposers = [];
+    this._disposers.push(disposer);
+  }
+
+  _disposeRegistered() {
+    const disposers = this._disposers || [];
+    this._disposers = [];
+    for (const disposer of disposers) {
+      try { disposer(); }
+      catch (err) { this.ctx?.log?.error?.("notification-hub disposable error:", err?.message || err); }
+    }
+  }
+
   async onload() {
     const { dataDir, pluginDir, log, bus, config } = this.ctx;
 
@@ -58,9 +99,13 @@ export default class NotificationHubPlugin {
     this.ctx._notificationHubPlugin = this;
 
     this._clickLogPath = path.join(dataDir, "notification-clicks.jsonl");
-    this._handlingNotification = false;
+    this._activeToastIds = new Map();
+    this._conversationNotificationDedup = new Map();
+    this._notificationHubApi = createNotificationHubApi(this);
+    this.ctx._notificationHubApi = this._notificationHubApi;
 
-    const initialConfig = this._readConfig();
+    // No last-known settings exist during startup: fail closed on a read error.
+    const initialConfig = await this._readConfig();
     this._lastRawConfigSnapshot = this._configSnapshot(initialConfig);
     this._cfg = this._buildRuntimeConfig(initialConfig);
 
@@ -75,12 +120,13 @@ export default class NotificationHubPlugin {
       toastOffsetX: this._cfg.toastOffsetX,
       toastOffsetY: this._cfg.toastOffsetY,
       toastStyle: this._cfg.toastStyle,
-      dismissEffect: this._cfg.dismissEffect,
       particleShape: this._cfg.particleShape,
       autoParticleCountScale: this._cfg.autoParticleCountScale,
       manualParticleCountScale: this._cfg.manualParticleCountScale,
       particleSizeScale: this._cfg.particleSizeScale,
       particleIntervalEffect: this._cfg.particleIntervalEffect,
+      cardExitMode: this._cfg.cardExitMode,
+      cardExitFade: this._cfg.cardExitFade,
       entranceVisual: this._cfg.entranceVisual,
       autoDismissMotion: this._cfg.autoDismissMotion,
       manualDismissMotion: this._cfg.manualDismissMotion,
@@ -92,371 +138,133 @@ export default class NotificationHubPlugin {
     // 显式启动 toast 管理器进程
     this._customToast._startManager();
 
-    const unsub = bus.subscribe((event, sessionPath) => {
-      try { this._handleEvent(event, sessionPath); }
+    // 不限类型时，流式 message_update 会打满 v2 RPC 入站上限，message_end 被宿主吞掉。
+    const unsub = bus.subscribe(async (event, sessionPath) => {
+      try { await this._handleEvent(event, sessionPath); }
       catch (err) { log.error("notification-hub event handler error:", err?.message); }
-    });
+    }, { types: ["message_end", "turn_end", "channel_new_message", "error", "tool_error", "provider_error", "model_error", "model_unavailable", "rate_limit", "cron_job_done", "activity_update"] });
     this.register(unsub);
 
     log.info(`Notification Hub loaded. agents=${agentsDir} conv=${this._cfg.enableConversation}`);
   }
 
   onunload() {
+    this._disposeRegistered();
     this._clearChannelAggregation();
     this._customToast?.stop();
+    this._activeToastIds?.clear?.();
     if (this.ctx._notificationStore === this._store) delete this.ctx._notificationStore;
     if (this.ctx._notificationHubPlugin === this) delete this.ctx._notificationHubPlugin;
+    if (this.ctx._notificationHubApi === this._notificationHubApi) delete this.ctx._notificationHubApi;
     this.ctx.log.info("Notification Hub unloaded.");
   }
 
-  _handleEvent(event, sessionPath) {
+  async _handleEvent(event, sessionPath) {
     if (!event || !event.type) return;
     switch (event.type) {
       case "message_end": {
-        // message_end 有三种情况：
-        //   1. agent 回复结束 → stopReason 存在且不为 "toolUse" → 通知
-        //   2. agent 调工具   → stopReason === "toolUse"      → 跳过
-        //   3. 工具结果返回   → 无 stopReason（有 toolCallId） → 跳过
-        const stopReason = event.message?.stopReason;
-        if (stopReason && stopReason !== "toolUse" && stopReason !== "aborted") {
-          this._maybeRefreshConfig();
-          if (!this._cfg.enableConversation) break;
-          this._handleConversationEnd(event, sessionPath);
+        // Refresh session:list opportunistically so a known conversation never waits on it.
+        prewarmSessionInfo(this, sessionPath);
+        // 只允许明确的最终回复原因进入 conversation 通知。
+        // 错误、截断、取消和工具阶段必须走对应状态路径或直接跳过，避免伪造“回复好了”。
+        const stopReason = String(event.message?.stopReason || "").trim();
+        if (this._isMessageFailure(event.message, stopReason)) {
+          const refresh = this._maybeRefreshConfig();
+          if (refresh?.then) await refresh;
+          this._handleStatusEvent({
+            type: "error",
+            source: event.source || event.provider || "模型",
+            error: this._extractMessageFailure(event.message, stopReason),
+            meta: { stopReason, sessionPath },
+          }, sessionPath);
+          break;
         }
+        if (event.message?.role === "assistant" && this._isFinalConversationStopReason(stopReason)) {
+          if (!this._claimConversationNotification(sessionPath, event.message)) break;
+          const refresh = this._maybeRefreshConfig();
+          if (refresh?.then) await refresh;
+          if (!this._cfg.enableConversation) break;
+          await this._handleConversationEnd(event, sessionPath);
+        }
+        break;
+      }
+
+      case "turn_end": {
+        const message = event.message;
+        if (event.aborted === true || message?.role !== "assistant") break;
+        const stopReason = String(message.stopReason || "").trim();
+        if (this._isMessageFailure(message, stopReason)) break;
+        if (!this._isFinalConversationStopReason(stopReason)) break;
+        if (!this._claimConversationNotification(sessionPath, message)) break;
+        const refresh = this._maybeRefreshConfig();
+        if (refresh?.then) await refresh;
+        if (!this._cfg.enableConversation) break;
+        await this._handleConversationEnd({ type: "message_end", message, agentId: event.agentId }, sessionPath);
         break;
       }
 
       case "channel_new_message": {
-        this._maybeRefreshConfig({ force: true });
+        const refresh = this._maybeRefreshConfig({ force: true });
+        if (refresh?.then) await refresh;
         if (!this._cfg.enableChannel) break;
-        this._handleChannelMessage(event);
+        await this._handleChannelMessage(event);
         break;
       }
 
-      // notification-hub: 接管引擎/原生 notify → custom toast
-      // 仅 custom mode 生效；native mode 下跳过，避免自递归
       case "notification": {
-        this._maybeRefreshConfig();
-        if (this._cfg.displayMode !== "custom") break;
-        if (this._handlingNotification) break;
-        this._handlingNotification = true;
-        try {
-          const agentInfo = event.agentId ? this._agentResolver.get(event.agentId) : null;
-          const primary = agentInfo?.theme?.primary || "#636e72";
-          const notification = {
-            id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            type: "status",
-            source: event.source || event.sessionPath || "notification",
-            title: event.title || "通知",
-            body: event.body || "",
-            agentId: event.agentId || "notification",
-            agentName: agentInfo?.displayName || event.agentName || "通知",
-            primary,
-            accent: agentInfo?.theme?.accent || primary,
-            emoji: agentInfo?.theme?.emoji || event.emoji || "🔔",
-            importance: event.importance || "normal",
-            matchedKeywords: [],
-            meta: { originalEventType: event.type, source: event.source || null, sessionPath },
-            sound: Boolean(event.sound),
-            soundTheme: event.soundTheme || this._resolveStatusSoundTheme(false),
-            customSoundPath: event.customSoundPath || this._resolveCustomSoundPath({ type: "status", customSoundPath: event.customSoundPath }),
-            timestamp: new Date().toISOString(),
-          };
-          this._recordAndEmit(notification);
-        } finally {
-          this._handlingNotification = false;
-        }
         break;
       }
 
       case "error":
+      case "tool_error":
+      case "provider_error":
+      case "model_error":
+      case "model_unavailable":
+      case "rate_limit":
       case "cron_job_done":
       case "activity_update": {
-        this._maybeRefreshConfig();
-        if (!this._cfg.enableStatusNotifications) break;
+        const refresh = this._maybeRefreshConfig();
+        if (refresh?.then) await refresh;
         this._handleStatusEvent(event, sessionPath);
         break;
       }
     }
   }
 
-  _handleConversationEnd(event, sessionPath) {
-    if (!sessionPath || sessionPath.includes("subagent-sessions")) return;
-
-    const normalizedSessionPath = sessionPath.replace(/\\/g, "/");
-    // phone sessions are delivery/coordination internals for channel/DM agents;
-    // channel notifications are handled by channel_new_message, so avoid duplicate
-    // or synthetic "System 回复好了" popups from phone session message_end events.
-    if (normalizedSessionPath.includes("/phone/sessions/")) return;
-
-    const agentInfo = this._resolveAgentFromSession(sessionPath, event);
-    if (this._isSystemSender(agentInfo?.id) || this._isSystemSender(agentInfo?.displayName)) return;
-    const title = this._getSessionTitle(sessionPath);
-    const summary = this._extractSummary(event.message);
-
-    const body = summary
-      ? `${agentInfo.displayName}: ${summary}`
-      : `${agentInfo.displayName} 回复好了`;
-    const importance = this._resolveImportance("conversation", `${title || ""}\n${body}`);
-
-    const notification = {
-      type: "conversation",
-      source: sessionPath,
-      title: title || agentInfo.displayName,
-      body,
-      agentId: agentInfo.id,
-      agentName: agentInfo.displayName,
-      emoji: agentInfo.theme.emoji,
-      primary: agentInfo.theme.primary,
-      accent: agentInfo.theme.accent,
-      importance: importance.level,
-      matchedKeywords: importance.keywords,
-      meta: { stopReason: event.message?.stopReason, matchedKeywords: importance.keywords },
-      sound: this._shouldPlaySound("conversation", importance.level),
-      soundTheme: this._resolveNotificationSoundTheme("conversation", importance.level),
-      customSoundPath: this._resolveNotificationCustomSoundPath("conversation"),
-    };
-
-    this._recordAndEmit(notification);
-
-    this.ctx.log.info(`[通知] ${agentInfo.displayName} 回复了「${title || "无标题"}」`);
-  }
-
-  _handleChannelMessage(event) {
-    const { channelName, sender, message } = event;
-    if (!channelName || !message) return;
-    if (this._isSystemSender(sender)) return;
-
-    const agentInfo = this._agentResolver.resolveFromSender(sender);
-    if (this._isSystemSender(agentInfo?.id) || this._isSystemSender(agentInfo?.displayName)) return;
-    const channelInfo = this._resolveChannel(channelName);
-    const channelDisplayName = channelInfo?.name || channelName;
-    const bodyText = message.body
-      ? message.body.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().slice(0, 800)
-      : "(空消息)";
-
-    const body = `${agentInfo.displayName}: ${bodyText}`;
-    const importance = this._resolveImportance("channel", `${channelDisplayName}\n${body}`);
-
-    const notification = {
-      type: "channel",
-      source: `#${channelName}`,
-      title: channelDisplayName,
-      body,
-      agentId: sender,
-      agentName: agentInfo.displayName,
-      emoji: agentInfo.theme.emoji,
-      primary: agentInfo.theme.primary,
-      accent: agentInfo.theme.accent,
-      importance: importance.level,
-      matchedKeywords: importance.keywords,
-      meta: {
-        channelId: channelInfo?.id || channelName,
-        channelName,
-        channelDisplayName,
-        matchedKeywords: importance.keywords,
-        timestamp: message.timestamp,
-      },
-      sound: this._shouldPlaySound("channel", importance.level),
-      soundTheme: this._resolveNotificationSoundTheme("channel", importance.level),
-      customSoundPath: this._resolveNotificationCustomSoundPath("channel"),
-    };
-
-    if (this._maybeAggregateChannelNotification(notification)) return;
-
-    this._recordAndEmit(notification);
-  }
-
-  _clearChannelAggregation() {
-    for (const entry of this._channelAggregation?.values?.() || []) {
-      if (entry.timer) clearTimeout(entry.timer);
+  _claimConversationNotification(sessionPath, message) {
+    const now = Date.now();
+    for (const [key, claimedAt] of this._conversationNotificationDedup) {
+      if (now - claimedAt > 120_000) this._conversationNotificationDedup.delete(key);
     }
-    this._channelAggregation?.clear?.();
-  }
-
-  _drainChannelAggregation() {
-    const entries = Array.from(this._channelAggregation?.values?.() || []);
-    this._clearChannelAggregation();
-    for (const entry of entries) {
-      for (const item of entry.items || []) {
-        this._recordAndEmit(item);
-      }
-    }
-  }
-
-  _maybeAggregateChannelNotification(notification) {
-    if (!this._cfg?.enableChannelAggregation) return false;
-    if (notification.type !== "channel") return false;
-    if (notification.importance === "important" || notification.importance === "urgent") return false;
-
-    const key = notification.source || notification.meta?.channelName || notification.title || "channel";
-    let entry = this._channelAggregation.get(key);
-    if (!entry) {
-      entry = { items: [], timer: null };
-      this._channelAggregation.set(key, entry);
-    }
-
-    entry.items.push(notification);
-
-    if (entry.items.length >= this._cfg.channelAggregationThreshold) {
-      this._flushChannelAggregation(key, "aggregate");
-      return true;
-    }
-
-    if (!entry.timer) {
-      entry.timer = setTimeout(() => {
-        this._flushChannelAggregation(key, "auto");
-      }, this._cfg.channelAggregationWindowMs);
-      entry.timer.unref?.();
-    }
-
+    const key = JSON.stringify([
+      sessionPath || "",
+      message?.timestamp ?? "",
+      message?.responseId || "",
+    ]);
+    if (this._conversationNotificationDedup.has(key)) return false;
+    this._conversationNotificationDedup.set(key, now);
     return true;
   }
 
-  _flushChannelAggregation(key, mode = "auto") {
-    const entry = this._channelAggregation?.get?.(key);
-    if (!entry) return;
-    if (entry.timer) clearTimeout(entry.timer);
-    this._channelAggregation.delete(key);
+  _handleConversationEnd(event, sessionPath) { return handleConversationEnd(this, event, sessionPath); }
 
-    const items = entry.items || [];
-    if (!items.length) return;
+  _handleChannelMessage(event) { return handleChannelMessage(this, event); }
 
-    if (mode !== "aggregate" && items.length < this._cfg.channelAggregationThreshold) {
-      for (const item of items) {
-        this._recordAndEmit(item);
-      }
-      return;
-    }
+  _clearChannelAggregation() { return clearChannelAggregation(this); }
 
-    const first = items[0];
-    const names = Array.from(new Set(items.map((n) => n.agentName).filter(Boolean))).slice(0, 4);
-    const senders = names.length ? names.join("、") : "成员";
-    const snippets = items
-      .map((n) => String(n.body || "").replace(/^.*?:\s*/, "").trim())
-      .filter(Boolean)
-      .slice(0, 3)
-      .join(" / ");
+  _drainChannelAggregation() { return drainChannelAggregation(this); }
 
-    const aggregate = {
-      type: "channel",
-      source: first.source,
-      title: first.title,
-      body: `${first.title} 有 ${items.length} 条新消息\n${senders}：${snippets || "正在聊天"}`,
-      agentId: "notification-hub",
-      agentName: "频道摘要",
-      emoji: "💬",
-      primary: first.primary,
-      accent: first.accent,
-      importance: "normal",
-      matchedKeywords: [],
-      meta: {
-        aggregate: true,
-        count: items.length,
-        channelId: first.meta?.channelId,
-        channelName: first.meta?.channelName,
-        channelDisplayName: first.meta?.channelDisplayName || first.title,
-        senders: names,
-      },
-      sound: false,
-      soundTheme: this._cfg.notificationSoundTheme,
-    };
+  _maybeAggregateChannelNotification(notification) { return maybeAggregateChannelNotification(this, notification); }
 
-    this._recordAndEmit(aggregate);
-  }
+  _flushChannelAggregation(key, mode = "auto") { return flushChannelAggregation(this, key, mode); }
 
-  _handleStatusEvent(event, sessionPath) {
-    if (!event || !event.type) return;
+  _handleStatusEvent(event, sessionPath) { return handleStatusEvent(this, event, sessionPath); }
 
-    if (event.type === "error") {
-      if (!this._cfg.enableErrorNotifications) return;
-      const source = event.source || "HanaAgent";
-      const message = this._truncateStatusText(event.error || event.message || "未知错误");
-      this._pushStatusNotification({
-        title: "运行错误",
-        body: `${source}: ${message}`,
-        importance: "important",
-        meta: { eventType: event.type, source, sessionPath },
-      });
-      return;
-    }
+  _pushStatusNotification(payload) { return pushStatusNotification(this, payload); }
 
-    if (event.type === "cron_job_done") {
-      if (!this._cfg.enableTaskDoneNotifications) return;
-      const label = event.label || event.jobLabel || event.jobName || event.jobId || "定时任务";
-      this._pushStatusNotification({
-        title: "任务完成",
-        body: `${label} 已完成`,
-        importance: "normal",
-        meta: { eventType: event.type, jobId: event.jobId, sessionPath },
-      });
-      return;
-    }
+  _recordAndEmit(notification) { return recordAndEmit(this, notification); }
 
-    if (event.type === "activity_update") {
-      const activity = event.activity || {};
-      const status = String(activity.status || activity.state || activity.phase || "").toLowerCase();
-      const kind = String(activity.type || activity.kind || activity.category || "任务");
-      const label = activity.label || activity.title || activity.name || activity.task || activity.id || kind;
-      const errorText = activity.error || activity.errorMessage || activity.message;
-      const isFailure = ["failed", "error", "errored", "failure", "rejected"].includes(status) || Boolean(activity.error || activity.failed);
-      const isDone = ["done", "completed", "complete", "success", "succeeded", "resolved"].includes(status) || activity.done === true;
-
-      if (isFailure) {
-        if (!this._cfg.enableErrorNotifications) return;
-        this._pushStatusNotification({
-          title: "任务失败",
-          body: `${label}: ${this._truncateStatusText(errorText || "执行失败")}`,
-          importance: "important",
-          meta: { eventType: event.type, activity, sessionPath },
-        });
-        return;
-      }
-
-      if (isDone) {
-        if (!this._cfg.enableTaskDoneNotifications) return;
-        this._pushStatusNotification({
-          title: "任务完成",
-          body: `${label} 已完成`,
-          importance: "normal",
-          meta: { eventType: event.type, activity, sessionPath },
-        });
-      }
-    }
-  }
-
-  _pushStatusNotification({ title, body, importance = "normal", meta = {} }) {
-    const isImportant = importance === "important" || importance === "urgent";
-    const notification = {
-      type: "status",
-      source: meta.source || meta.eventType || "status",
-      title,
-      body,
-      agentId: "notification-hub",
-      agentName: isImportant ? "状态警报" : "状态监控",
-      emoji: isImportant ? "⚠️" : "✅",
-      primary: isImportant ? "#ff7675" : "#10a37f",
-      accent: isImportant ? "#fdcb6e" : "#74b9ff",
-      importance,
-      matchedKeywords: [],
-      meta,
-      sound: this._shouldPlaySound("status", importance),
-      soundTheme: this._resolveStatusSoundTheme(isImportant),
-    };
-
-    this._recordAndEmit(notification);
-  }
-
-  _recordAndEmit(notification) {
-    const decorated = this._decorateToastNotification(notification);
-    const record = this._store.push(decorated) || decorated;
-    this._emitDesktopNotification(record, true);
-    return record;
-  }
-
-  _truncateStatusText(value) {
-    return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
-  }
+  _truncateStatusText(value) { return truncateStatusText(this, value); }
 
   _handleToastClick(click) {
     try {
@@ -476,111 +284,87 @@ export default class NotificationHubPlugin {
 
       fs.appendFileSync(this._clickLogPath, JSON.stringify(action) + "\n", "utf8");
       this.ctx.log.info(`[通知点击] ${action.actionType} -> ${action.actionTarget || action.title}`);
-
-      // Navigate to the source
-      try {
-        if (action.actionType === "channel" || action.actionType === "channel-aggregate") {
-          const channelId = action.actionTarget || action.source;
-          if (channelId) {
-            this.ctx.bus?.emit?.({ type: "open_channel", channelId }, null);
-          }
-        } else if (action.actionType === "conversation" || action.actionType === "history") {
-          const sessionPath = action.actionTarget || action.source;
-          if (sessionPath) {
-            this.ctx.bus?.emit?.({ type: "open_conversation", sessionPath }, null);
-          }
-        }
-      } catch (err) {
-        this.ctx.log.warn("notification click navigate failed:", err.message);
-      }
-
-      try {
-        this.ctx.bus?.emit?.({
-          type: "app_event",
-          event: {
-            type: "notification-hub-click",
-            payload: action,
-            source: "notification-hub",
-          },
-        }, null);
-      } catch (err) {
-        this.ctx.log.warn("notification click app_event emit failed:", err.message);
-      }
-
-      try {
-        this.ctx.bus?.emit?.(action, null);
-      } catch (err) {
-        this.ctx.log.warn("notification click bus emit failed:", err.message);
-      }
+      // v2 不能 emit open_conversation / open_channel / app_event。点击只写入历史，通知页据此高亮。
     } catch (err) {
       this.ctx.log.warn("notification click handler failed:", err.message);
     }
   }
 
-  _emitDesktopNotification(notification, alreadyDecorated = false) {
-    const toastNotification = alreadyDecorated ? notification : this._decorateToastNotification(notification);
-    this._emitDecoratedDesktopNotification(toastNotification);
+  _emitDesktopNotification(notification, alreadyDecorated = false) { return emitDesktopNotification(this, notification, alreadyDecorated); }
+
+  _now() {
+    return new Date();
   }
 
-  _emitDecoratedDesktopNotification(toastNotification) {
-    const title = `${toastNotification.emoji || ""} ${toastNotification.title}`.trim();
-    const body = toastNotification.body || "";
+  _popupBlockReason(notification) { return popupBlockReason(this, notification); }
 
-    if (this._cfg.displayMode === "custom") {
-      this._customToast?.show(toastNotification);
-      return;
+  _emitDecoratedDesktopNotification(toastNotification) { return emitDecoratedDesktopNotification(this, toastNotification); }
+
+  _notifyExternal(payload = {}) {
+    const kind = String(payload.kind || "notify");
+    const notification = normalizeExternalNotification(payload, kind);
+    if (kind === "error") {
+      notification.title = notification.title || "运行错误";
+      notification.importance = notification.importance === "normal" ? "important" : notification.importance;
+      notification.emoji = notification.emoji || "⚠️";
+    } else if (kind === "success") {
+      notification.title = notification.title || "操作完成";
+      notification.emoji = notification.emoji || "✅";
     }
-
-    if (this._cfg.displayMode === "native") {
-      try {
-        this.ctx.bus.emit({
-          type: "notification",
-          title,
-          body,
-          agentId: toastNotification.agentId || null,
-        }, null);
-      } catch (err) {
-        this.ctx.log.warn("emit notification failed:", err.message);
-      }
-      return;
+    if (kind === "progress") {
+      notification.meta = { ...(notification.meta || {}), progress: notification.progress };
+      notification.updateExistingId = notification.notificationId || notification.id;
     }
+    const record = this._recordAndEmit(notification);
+    return { ok: true, notification: record, apiVersion: "1.0" };
+  }
 
-    this.ctx.log.info(`notification popup suppressed by mode=${this._cfg.displayMode}`);
+  async _dismissExternal({ notificationId, id } = {}) {
+    const key = String(notificationId || id || "").trim();
+    if (!key) return { ok: false, error: "notificationId required" };
+    const toastId = this._activeToastIds.get(key);
+    if (!toastId) return { ok: false, dismissed: false, notificationId: key };
+    const dismissed = await this._customToast?.close?.(toastId);
+    if (dismissed) this._activeToastIds.delete(key);
+    return { ok: dismissed === true, dismissed: dismissed === true, notificationId: key };
+  }
+
+  _getRecentExternal({ limit = 10, type } = {}) {
+    const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
+    return { ok: true, records: this._store?.recent?.(safeLimit, type) || [], apiVersion: "1.0" };
+  }
+
+  _testExternal(options = {}) {
+    const payload = normalizeExternalNotification({
+      title: options.title || "Notification Hub 测试",
+      body: options.body || "公共插件接口工作正常。",
+      source: options.source || "notification-hub-api-test",
+      type: options.type || "status",
+      importance: options.importance || "normal",
+      ...options,
+    }, "notify");
+    const record = this._recordAndEmit(payload);
+    return { ok: true, notification: record, apiVersion: "1.0" };
+  }
+
+  _isFinalConversationStopReason(value) {
+    return new Set(["stop", "end", "end_turn", "endturn", "stop_sequence", "completed", "success"]).has(String(value || "").toLowerCase());
+  }
+
+  _isMessageFailure(message = {}, stopReason = "") {
+    const reason = String(stopReason || "").toLowerCase();
+    if (["error", "failed", "failure", "timeout", "rate_limit", "ratelimit", "content_filter", "model_unavailable", "max_tokens"].includes(reason)) return true;
+    return Boolean(message?.error || message?.errorMessage || message?.failed);
+  }
+
+  _extractMessageFailure(message = {}, stopReason = "") {
+    const raw = message?.error || message?.errorMessage || message?.reason || this._extractSummary(message) || `模型结束原因为 ${stopReason || "未知错误"}`;
+    return this._truncateStatusText(raw);
   }
 
   // ─── 辅助函数 ───
 
-  _resolveChannel(channelName) {
-    if (!channelName) return null;
-    if (this._channelCache?.has(channelName)) return this._channelCache.get(channelName);
-
-    let info = null;
-    try {
-      const channelFile = path.join(this._channelsDir || "", `${channelName}.md`);
-      if (fs.existsSync(channelFile)) {
-        const raw = fs.readFileSync(channelFile, "utf-8");
-        const match = raw.match(/^---\s*\n([\s\S]*?)\n---/);
-        const frontmatter = match?.[1] || "";
-        const data = {};
-        for (const line of frontmatter.split(/\r?\n/)) {
-          const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-          if (!kv) continue;
-          data[kv[1]] = kv[2].trim();
-        }
-        info = {
-          id: data.id || channelName,
-          name: data.name || null,
-          description: data.description || null,
-        };
-      }
-    } catch (err) {
-      this.ctx?.log?.warn?.(`resolve channel ${channelName} failed: ${err.message}`);
-    }
-
-    if (!info) info = { id: channelName, name: null, description: null };
-    this._channelCache?.set(channelName, info);
-    return info;
-  }
+  _resolveChannel(channelName) { return resolveChannel(this, channelName); }
 
   _isSystemSender(sender) {
     if (sender == null) return false;
@@ -589,14 +373,7 @@ export default class NotificationHubPlugin {
   }
 
   _readConfig() {
-    const config = this.ctx?.config;
-    try {
-      if (config?.getAll) return config.getAll() || {};
-      if (config?.get) return config.get() || {};
-    } catch (err) {
-      this.ctx?.log?.warn?.("notification-hub read runtime config failed:", err?.message || err);
-    }
-    return config && typeof config === "object" ? config : {};
+    return readHostConfig(this.ctx);
   }
 
   _buildRuntimeConfig(config) {
@@ -620,11 +397,24 @@ export default class NotificationHubPlugin {
     const now = Date.now();
     if (!options.force && this._lastConfigRefresh && (now - this._lastConfigRefresh) < 2000) return;
     this._lastConfigRefresh = now;
-    this._refreshConfigNow();
+    return this._refreshConfigNow();
   }
 
   _refreshConfigNow() {
-    const rawConfig = this._readConfig();
+    const revision = this._configRevision || 0;
+    const apply = (raw) => revision === (this._configRevision || 0) ? this._refreshResolvedConfig(raw) : this._cfg;
+    const failed = (err) => {
+      this.ctx?.log?.warn?.("notification-hub read runtime config failed:", err?.message || err);
+      if (!this._cfg) throw err;
+      return this._cfg;
+    };
+    try {
+      const rawConfig = this._readConfig();
+      return rawConfig?.then ? rawConfig.then(apply, failed) : apply(rawConfig);
+    } catch (err) { return failed(err); }
+  }
+
+  _refreshResolvedConfig(rawConfig = {}) {
     const snapshot = this._configSnapshot(rawConfig);
     if (this._cfg && this._lastRawConfigSnapshot === snapshot) {
       this._lastConfigRefresh = Date.now();
@@ -636,6 +426,7 @@ export default class NotificationHubPlugin {
 
   _applyRuntimeConfigSnapshot(rawConfig = {}, snapshot = this._configSnapshot(rawConfig)) {
     const previousConfig = this._cfg;
+    this._configRevision = (this._configRevision || 0) + 1;
     this._lastRawConfigSnapshot = snapshot;
     this._cfg = this._buildRuntimeConfig(rawConfig);
     this._lastConfigRefresh = Date.now();
@@ -657,12 +448,13 @@ export default class NotificationHubPlugin {
     this._customToast.toastOffsetX = this._cfg.toastOffsetX;
     this._customToast.toastOffsetY = this._cfg.toastOffsetY;
     this._customToast.toastStyle = this._cfg.toastStyle;
-    this._customToast.dismissEffect = this._cfg.dismissEffect;
     this._customToast.particleShape = this._cfg.particleShape;
     this._customToast.autoParticleCountScale = this._cfg.autoParticleCountScale;
     this._customToast.manualParticleCountScale = this._cfg.manualParticleCountScale;
     this._customToast.particleSizeScale = this._cfg.particleSizeScale;
     this._customToast.particleIntervalEffect = this._cfg.particleIntervalEffect;
+    this._customToast.cardExitMode = this._cfg.cardExitMode;
+    this._customToast.cardExitFade = this._cfg.cardExitFade;
     this._customToast.entranceVisual = this._cfg.entranceVisual;
     this._customToast.autoDismissMotion = this._cfg.autoDismissMotion;
     this._customToast.manualDismissMotion = this._cfg.manualDismissMotion;
@@ -684,8 +476,20 @@ export default class NotificationHubPlugin {
   }
 
   showCustomToast(notification, options = {}) {
-    if (options.refreshConfig !== false) this._refreshConfigNow();
+    const refresh = options.refreshConfig === false ? null : this._refreshConfigNow();
+    if (refresh && typeof refresh.then === "function") {
+      return refresh.then(() => this._showDecoratedCustomToast(notification, options));
+    }
+    return this._showDecoratedCustomToast(notification, options);
+  }
+
+  _showDecoratedCustomToast(notification, options = {}) {
     const decorated = this._decorateToastNotification(notification);
+    if (options.confirmDisplay) {
+      const blocked = this._popupBlockReason(decorated) || (this._cfg.displayMode === "off" ? "mode=off" : "");
+      if (blocked) return { status: "suppressed", error: blocked };
+      return this._customToast?.showConfirmed?.(decorated) || { status: "failed", error: "自定义弹窗确认入口不可用" };
+    }
     this._customToast?.show?.(decorated);
     return decorated;
   }
@@ -710,8 +514,8 @@ export default class NotificationHubPlugin {
     return resolveNotificationSoundTheme(this._cfg, type, importance);
   }
 
-  _resolveNotificationCustomSoundPath(type) {
-    return resolveNotificationCustomSoundPath(this._cfg, type);
+  _resolveNotificationCustomSoundPath(type, importance) {
+    return resolveNotificationCustomSoundPath(this._cfg, type, importance);
   }
 
   _resolveCustomSoundPath(notification) {
@@ -720,10 +524,6 @@ export default class NotificationHubPlugin {
 
   _normalizeToastStyle(value) {
     return normalizeToastStyle(value);
-  }
-
-  _normalizeDismissEffect(value, sakuraEnabled) {
-    return normalizeDismissEffect(value, sakuraEnabled);
   }
 
   _normalizeParticleShape(value, legacyDismissEffect) {
@@ -800,27 +600,7 @@ export default class NotificationHubPlugin {
     return null;
   }
 
-  _resolveAgentFromSession(sessionPath, event) {
-    const normalPath = sessionPath.replace(/\\/g, "/");
-    const match = normalPath.match(/\/agents\/([^/]+)\/sessions\//);
-    if (match) {
-      const info = this._agentResolver.get(match[1]);
-      if (info) return info;
-    }
-    return this._agentResolver.resolveFromSender(event.agentId);
-  }
+  _resolveAgentFromSession(sessionPath, event) { return resolveAgentFromSession(this, sessionPath, event); }
 
-  _getSessionTitle(sessionPath) {
-    try {
-      const sessionDir = path.dirname(sessionPath);
-      const titlesFile = path.join(sessionDir, "session-titles.json");
-      if (!fs.existsSync(titlesFile)) return null;
-      const raw = fs.readFileSync(titlesFile, "utf-8");
-      const titles = JSON.parse(raw);
-      const normalized = sessionPath.replace(/\\/g, "/");
-      return titles[normalized] || titles[sessionPath] || null;
-    } catch {
-      return null;
-    }
-  }
+  _getSessionTitle(sessionPath) { return getSessionTitle(this, sessionPath); }
 }

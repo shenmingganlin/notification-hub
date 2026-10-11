@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentResolver } from "../lib/agent-resolver.js";
 import NotificationHubPlugin from "../index.js";
-import registerWidgetRoutes from "../routes/widget.js";
+import registerWidgetRoutes from "../server/widget-routes.js";
 import { execute as listNotifications, parameters as listNotificationParameters } from "../tools/list-notifications.js";
 
 const pluginRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -70,12 +70,15 @@ try {
   assert.match(listResult.content[0].text, /状态标题/, "list-notifications should return status records when filtered");
   assert.equal(listResult.details.type, "status", "list-notifications details should preserve status filter");
 
-  // Engine/native notification events should enter normal history + custom toast path as status notifications.
+  // Host notification events should use the host Windows notification surface only.
   const plugin = new NotificationHubPlugin();
   const records = [];
   const shown = [];
+  const hostNotifications = [];
+  const warnings = [];
   plugin.ctx = {
-    log: { info() {}, warn() {}, error() {} },
+    notifications: { async show(payload) { hostNotifications.push(payload); } },
+    log: { info() {}, warn(...args) { warnings.push(args); }, error() {} },
     config: { getAll: () => ({
       notificationDisplayMode: "custom",
       enableStatusNotifications: true,
@@ -105,22 +108,21 @@ try {
   plugin._channelAggregation = new Map();
   plugin._lastRawConfigSnapshot = undefined;
   plugin._cfg = null;
-  plugin._handleEvent({ type: "notification", title: "原生通知", body: "需要进入历史", agentId: "hanako", source: "engine", sound: true }, "C:/sessions/one.jsonl");
-  assert.equal(records.length, 1, "engine notification should be recorded through NotificationStore");
-  assert.equal(shown.length, 1, "engine notification should use the normal custom toast delivery path");
-  assert.strictEqual(shown[0], records[0], "engine notification toast and store record should be the same decorated object");
-  assert.equal(records[0].type, "status", "engine notification should be normalized to status type");
-  assert.equal(records[0].meta?.originalEventType, "notification", "engine notification should preserve original event type metadata");
-  assert.equal(records[0].meta?.source, "engine", "engine notification should preserve source metadata");
-  assert.equal(records[0].meta?.sessionPath, "C:/sessions/one.jsonl", "engine notification should preserve session path metadata");
-  assert.equal(records[0].customSoundPath, "C:/tones/status.wav", "engine notification should carry status custom sound path when sound is requested");
+  await plugin._handleEvent({ type: "notification", title: "原生通知", body: "宿主自行展示", agentId: "hanako", source: "engine", sound: true }, "C:/sessions/one.jsonl");
+  assert.equal(hostNotifications.length, 0, "host notification event must not call ctx.notifications.show");
+  assert.equal(shown.length, 0, "host notification event must not call customToast.show");
+  assert.equal(records.length, 0, "host notification event must not call store.push");
+  assert.equal(warnings.length, 0, "ignored host notification event must not log a warning");
 
   // Private JS/C# contracts: custom sound payload and authenticated configurable TCP manager.
   const toastPayloadSource = fs.readFileSync(path.join(pluginRoot, "helper/Models/ToastPayload.cs"), "utf8");
-  const helperSource = fs.readFileSync(path.join(pluginRoot, "helper/NotificationToastHelper.cs"), "utf8");
+  const helperSource = ["helper/Program.cs", "helper/ToastProcess.cs", "helper/ToastForm.cs", "helper/Particles/ParticleOverlay.cs"]
+    .map((file) => fs.readFileSync(path.join(pluginRoot, file), "utf8"))
+    .join("\n");
   const helperProjectSource = fs.readFileSync(path.join(pluginRoot, "helper/NotificationToastHelper.csproj"), "utf8");
   const soundPlayerSource = fs.readFileSync(path.join(pluginRoot, "helper/Sound/NotificationSoundPlayer.cs"), "utf8");
   const customToastSource = fs.readFileSync(path.join(pluginRoot, "lib/custom-toast.js"), "utf8");
+  const toastManagerClientSource = fs.readFileSync(path.join(pluginRoot, "lib/toast-manager-client.js"), "utf8");
   assert.match(toastPayloadSource, /public\s+string\s+CustomSoundPath\s*=\s*""\s*;/, "C# file payload model should include CustomSoundPath");
   assert.match(toastPayloadSource, /p\.CustomSoundPath\s*=\s*Get\(raw,\s*"customSoundPath"/, "C# file payload loader should parse customSoundPath");
   assert.match(helperSource, /p\.CustomSoundPath\s*=\s*Payload\.Get\(json,\s*"customSoundPath"/, "C# TCP create path should parse customSoundPath");
@@ -136,10 +138,53 @@ try {
   assert.match(customToastSource, /_managerPortPath\s*=\s*path\.join\(this\.payloadDir,\s*"manager-port\.txt"\)/, "JS should persist manager port under payload dir");
   assert.match(customToastSource, /NH_TOAST_MANAGER_TOKEN:\s*this\._managerToken/, "JS should pass manager token to helper process");
   assert.match(customToastSource, /NH_TOAST_MANAGER_PORT:\s*String\(this\._managerPort\)/, "JS should pass manager port to helper process");
-  assert.match(customToastSource, /async\s+ping\([^)]*\)[\s\S]*expectOp:\s*"pong"/, "JS manager client should require pong handshake");
-  assert.match(customToastSource, /sendCreate\([^)]*\)[\s\S]*expectOp:\s*"queued"/, "JS manager client create command should require queued ack");
-  assert.match(customToastSource, /const\s+cmd\s*=\s*\{\s*\.\.\.command,\s*token:\s*this\._token\s*\}/, "JS manager client should inject token into every TCP command");
-  assert.match(customToastSource, /ack\.op\s*===\s*expectOp/, "JS manager client should validate ack op against expected operation");
+  assert.match(toastManagerClientSource, /async\s+ping\([^)]*\)[\s\S]*expectOp:\s*"pong"/, "JS manager client should require pong handshake");
+  assert.match(toastManagerClientSource, /sendCreate\([^)]*\)[\s\S]*expectOp:\s*"shown"/, "JS manager client create command should require shown ack");
+  assert.match(toastManagerClientSource, /const\s+cmd\s*=\s*\{\s*\.\.\.command,\s*token:\s*this\._token\s*\}/, "JS manager client should inject token into every TCP command");
+  assert.match(toastManagerClientSource, /ack\.op\s*===\s*expectOp/, "JS manager client should validate ack op against expected operation");
+  assert.match(customToastSource, /--queue",\s*this\._queueDir/, "JS should hand the manager a file queue because v2 app hosts cannot open TCP");
+  assert.match(toastManagerClientSource, /async _pingQueue\(/, "JS manager client should treat ready.json as the handshake");
+  assert.match(helperSource, /Application\.SetHighDpiMode\(HighDpiMode\.PerMonitorV2\)/, "C# helper should lock per-monitor DPI instead of inheriting the app host");
+  assert.match(helperSource, /StartFileQueue\(/, "C# manager should accept commands from the file queue");
+  assert.match(helperSource, /ParticleLayer\.Present\(/, "particle overlay should present a tight layered surface instead of invalidating a virtual-screen window");
+  assert.match(helperSource, /ParticleSpriteCache/, "particle shapes should be rasterized once and blitted");
+  assert.match(helperSource, /Math\.Min\(1200,/, "particle count cap should stay at 1200");
+  assert.match(helperSource, /!payload\.SakuraEnabled/, "turning particle exit off should skip the overlay");
+  assert.match(helperSource, /IsExiting \|\| !CardContainsScreen/, "exiting forms must stop accepting hit tests");
+  assert.match(helperSource, /toast\.ExitStarted \+=/, "manager must reflow at exit start");
+  assert.match(helperSource, /if \(!toast\.IsExiting\) toast\.SetTargetSlot/, "exit animations must not occupy interactive slots");
+  assert.match(helperSource, /ParticleOverlayHub\.LayerShown \+= RestackNotificationWindows/, "particle appearance must trigger notification Z-order reflow");
+  assert.match(helperSource, /RaiseNotificationWindow\(ParticleOverlayHub\.WindowHandle\)/, "particle layer must be raised before notification cards");
+  assert.match(helperSource, /if \(ordered\[i\]\.IsExiting\) RaiseNotificationWindow\(ordered\[i\]\.Handle\)/, "exiting cards must be raised below live cards");
+  assert.match(helperSource, /if \(!ordered\[i\]\.IsExiting\) RaiseNotificationWindow\(ordered\[i\]\.Handle\)/, "live cards must finish above exiting cards");
+  assert.match(helperSource, /SwpNoSize \| SwpNoMove \| SwpNoActivate \| SwpNoOwnerZOrder/, "Z-order raises must not activate or move notification windows");
+  assert.match(helperSource, /MoveWithoutChangingZOrder\(Left, y\)/, "stack animation must preserve its existing Z order");
+  assert.match(helperSource, /SwpNoSize \| SwpNoZOrder \| SwpNoActivate/, "position animation must use NOZORDER");
+  assert.match(helperSource, /finally \{ BeginExitAnimation\(\); \}/, "particle failure must still begin card close");
+  assert.doesNotMatch(helperSource, /ParticleCompositionPresenter|PresentComposition|CreateSwapChainForComposition|CreateTargetForHwnd/, "live helper entrypoints must not reach composition presentation");
+  assert.match(helperProjectSource, /Compile Remove="Particles\/ParticleCompositionPresenter.cs"/, "retired composition source must be excluded from the build");
+  assert.doesNotMatch(helperSource, /AttachThreadInput|keybd_event|SendInput|SetForegroundWindow/, "helper must not synthesize input or activate the host");
+  const widgetSource = fs.readFileSync(path.join(pluginRoot, "ui/widget.html"), "utf8");
+  assert.doesNotMatch(widgetSource, /focusConversation|__nhFocusSession|hana\.sessions\.focus|\/api\/sessions\/switch|切回|切不回|跳转|Session focus unavailable/, "notification center must not retain session navigation or navigation copy");
+  assert.doesNotMatch(widgetSource, /\.item\.type-conversation\s*\{[^}]*cursor:\s*pointer/, "conversation rows must not look clickable");
+  assert.doesNotMatch(widgetSource, /row\.addEventListener\(['"](?:click|keydown)['"]/, "conversation rows must not bind click or keyboard navigation");
+  assert.doesNotMatch(helperSource, /shape = effect/, "an old dismiss effect should not replace the particle shape");
+  const exitSource = fs.readFileSync(path.join(pluginRoot, "helper/Animations/ToastExitMotion.cs"), "utf8");
+  const particleMotionSource = fs.readFileSync(path.join(pluginRoot, "helper/Particles/ParticleMotionRegistry.cs"), "utf8");
+  assert.match(helperSource, /ToastExitMotion\.ReverseApproach\(p,/, "card slide and fade should share one exit clock");
+  assert.match(helperSource, /var exitMs = 640\.0/, "card exit should finish slide and fade together");
+  assert.doesNotMatch(helperSource, /slideMs|fadeMs/, "card exit should not keep a second clock");
+  assert.match(exitSource, /ReverseApproach/, "reverse entrance displacement should stay on the card motion");
+  assert.doesNotMatch(exitSource, /92 \* p \* p/, "retired card trajectory should not stay beside the reverse exit");
+  assert.doesNotMatch(exitSource, /PointF Delta/, "unused card trajectory switch should not stay");
+  assert.doesNotMatch(helperSource, /delta\.Y \* amp/, "card exit should not fly on the old upward delta");
+  assert.doesNotMatch(helperSource, /static PointF ExitCardDelta/, "card exit formula should not stay inside the toast form");
+  assert.doesNotMatch(helperSource, /static class ParticleMotionRegistry/, "particle motion formula should not stay inside the overlay form");
+  assert.match(particleMotionSource, /OrbitRadius \+= 0\.72f/, "vortex particle motion should stay on the particle");
+  assert.match(particleMotionSource, /Vy \+= 0\.070f/, "gravity particle motion should stay on the particle");
+  const presenterSource = fs.readFileSync(path.join(pluginRoot, "helper/Particles/ParticlePresenter.cs"), "utf8");
+  assert.match(presenterSource, /UpdateLayeredWindow/, "layered presenter should call UpdateLayeredWindow");
+  assert.match(presenterSource, /SmoothingMode\.AntiAlias/, "baked particles should keep anti-aliased edges");
 
   console.log("runtime regression checks ok");
 } finally {

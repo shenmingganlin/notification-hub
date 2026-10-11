@@ -9,4 +9,11 @@
     <AssemblyName>notification-toast-helper</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Retained source is excluded: this helper has no composition/swap-chain path. -->
+    <Compile Remove="Particles/ParticleCompositionPresenter.cs" />
+    <PackageReference Include="Vortice.Direct2D1" Version="3.6.2" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
+    <PackageReference Include="Vortice.DirectComposition" Version="3.6.2" />
+  </ItemGroup>
 </Project>

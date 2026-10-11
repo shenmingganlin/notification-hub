@@ -3,7 +3,7 @@ import path from 'node:path';
 import Plugin from './index.js';
 
 const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'manifest.json'), 'utf8'));
-const props = manifest.contributes.configuration.properties;
+const props = manifest.contributes.settings?.schema?.properties || manifest.contributes.configuration?.properties;
 for (const key of ['enableStatusNotifications', 'enableErrorNotifications', 'enableTaskDoneNotifications']) {
   if (!props[key]) throw new Error(`${key} missing from manifest`);
 }

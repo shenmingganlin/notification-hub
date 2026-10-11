@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1080" viewBox="0 0 720 1080">
+  <defs>
+    <radialGradient id="notice-bloom" cx="50%" cy="36%" r="46%">
+      <stop offset="0" stop-color="#e8c48a" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="#e8c48a" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#e8c48a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="notice-paper" x1="0" y1="0" x2="0.15" y2="1">
+      <stop offset="0" stop-color="#fffaf4"/>
+      <stop offset="0.42" stop-color="#f4e7d4"/>
+      <stop offset="1" stop-color="#e6d0ae"/>
+    </linearGradient>
+    <linearGradient id="notice-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.7"/>
+      <stop offset="0.18" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="720" height="1080" fill="#100e0c"/>
+  <rect width="720" height="1080" fill="url(#notice-bloom)"/>
+  <g transform="rotate(-8 360 470)">
+    <rect x="132" y="268" width="456" height="300" rx="28" fill="#000" opacity="0.38"/>
+    <rect x="132" y="248" width="456" height="300" rx="28" fill="#3c3228"/>
+  </g>
+  <g transform="rotate(4 360 500)">
+    <rect x="78" y="312" width="564" height="404" rx="32" fill="#000" opacity="0.28"/>
+    <rect x="78" y="300" width="564" height="404" rx="32" fill="url(#notice-paper)"/>
+    <rect x="78" y="300" width="564" height="404" rx="32" fill="url(#notice-sheen)"/>
+    <rect x="78" y="300" width="564" height="404" rx="32" fill="none" stroke="#c6a36c" stroke-opacity="0.7" stroke-width="2"/>
+    <g transform="translate(124 356)" fill="#a87432">
+      <rect x="22" y="0" width="12" height="10" rx="4"/>
+      <path d="M28 10c-16 2-26 16-26 32 0 10-8 14-8 18h68c0-4-8-8-8-18 0-16-10-30-26-32z"/>
+      <circle cx="28" cy="70" r="6"/>
+    </g>
+    <circle cx="572" cy="368" r="11" fill="#e4b86a"/>
+    <rect x="196" y="368" width="268" height="22" rx="11" fill="#2b241c"/>
+    <rect x="124" y="448" width="430" height="16" rx="8" fill="#c9b496"/>
+    <rect x="124" y="484" width="360" height="16" rx="8" fill="#c9b496"/>
+    <rect x="124" y="520" width="240" height="16" rx="8" fill="#d8c7ae"/>
+  </g>
+</svg>

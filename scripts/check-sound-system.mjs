@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import Plugin from "../index.js";
-import registerWidgetRoutes from "../routes/widget.js";
+import registerWidgetRoutes from "../server/widget-routes.js";
 import { TOAST_EFFECTS, SOUND_THEMES, SOUND_THEME_IDS, normalizeSoundTheme } from "../lib/effect-registry.js";
 import {
   normalizeCustomSoundPath,
@@ -40,6 +40,8 @@ const config = {
   channelNotificationSoundTheme: "alarm",
   channelCustomNotificationSoundPath: "",
   importantNotificationSound: true,
+  importantNotificationSoundTheme: "alert",
+  importantCustomNotificationSoundPath: "",
   notificationSoundTheme: "chime",
   customNotificationSoundPath: "  D:/tones/global.mp3  ",
 };
@@ -52,7 +54,7 @@ assert.equal(shouldPlaySound(config, "conversation", "normal"), true, "conversat
 assert.equal(shouldPlaySound(config, "channel", "normal"), true, "channel sound should play unless its theme is off");
 assert.equal(shouldPlaySound({ ...config, conversationNotificationSoundTheme: "off" }, "conversation", "normal"), false, "off conversation theme should suppress conversation sound");
 assert.equal(shouldPlaySound({ ...config, channelNotificationSoundTheme: "off" }, "channel", "normal"), false, "off channel theme should suppress channel sound");
-assert.equal(shouldPlaySound({ ...config, notificationSoundTheme: "off" }, "status", "important"), false, "off theme should suppress important status sound");
+assert.equal(shouldPlaySound({ ...config, importantNotificationSoundTheme: "off" }, "status", "important"), false, "off important theme should suppress important status sound");
 assert.equal(resolveNotificationCustomSoundPath(config, "conversation"), "C:/tones/chat.wav", "conversation should use scoped custom path first");
 assert.equal(resolveNotificationCustomSoundPath(config, "channel"), "D:/tones/global.mp3", "channel should fall back to global custom path");
 assert.equal(resolveCustomSoundPath(config, { type: "conversation", customSoundPath: "  E:/explicit.wav  " }), "E:/explicit.wav", "explicit notification custom path should win");
@@ -89,10 +91,19 @@ assert.deepEqual(resolveNotificationSound(config, { type: "conversation", import
 }
 
 {
-  const status = decideNotificationSound({ ...config, notificationSoundTheme: "custom" }, { type: "status", importance: "important" });
+  const status = decideNotificationSound({ ...config, importantNotificationSoundTheme: "custom", notificationSoundTheme: "custom" }, { type: "status", importance: "important" });
   assert.equal(status.enabled, true, "important status custom decision should play");
   assert.equal(status.customSoundPath, "D:/tones/global.mp3", "status custom path should use global custom path");
-  assert.equal(status.pathSource, SOUND_DECISION_PATH_SOURCES.GLOBAL, "status custom path source should be global");
+  assert.equal(status.pathSource, SOUND_DECISION_PATH_SOURCES.INHERITED_GLOBAL, "important custom sound should inherit the global custom path");
+}
+
+{
+  const important = decideNotificationSound({ ...config, importantNotificationSoundTheme: "custom", importantCustomNotificationSoundPath: "C:/tones/important.wav" }, { type: "status", importance: "urgent" });
+  assert.equal(important.soundTheme, "custom", "important notification should use its configured theme");
+  assert.equal(important.customSoundPath, "C:/tones/important.wav", "important notification should prefer its dedicated custom path");
+  const disabled = decideNotificationSound({ ...config, importantNotificationSound: false, importantNotificationSoundTheme: "alarm" }, { type: "status", importance: "important" });
+  assert.equal(disabled.enabled, true, "explicit important theme must override the retired boolean");
+  assert.equal(disabled.soundTheme, "alarm");
 }
 
 {
@@ -118,6 +129,7 @@ assert.deepEqual(resolveNotificationSound(config, { type: "conversation", import
 assert.deepEqual(SOUND_PICKER_TARGETS, {
   conversation: "conversationCustomNotificationSoundPath",
   channel: "channelCustomNotificationSoundPath",
+  important: "importantCustomNotificationSoundPath",
   status: "customNotificationSoundPath",
   global: "customNotificationSoundPath",
 }, "sound picker targets should stay explicit and whitelisted");
@@ -125,6 +137,7 @@ assert.deepEqual(resolveSoundPickerTarget("conversation"), {
   id: "conversation",
   configKey: "conversationCustomNotificationSoundPath",
 }, "conversation picker target should resolve to the conversation custom path key");
+assert.deepEqual(resolveSoundPickerTarget("important"), { id: "important", configKey: "importantCustomNotificationSoundPath" }, "important picker target should resolve to the important custom path key");
 assert.equal(resolveSoundPickerTarget("unknown"), null, "unknown picker targets should be rejected before opening a dialog");
 assert.ok(SOUND_FILE_FILTER.includes("*.wav") && SOUND_FILE_FILTER.includes("*.mp3") && SOUND_FILE_FILTER.includes("*.m4a"), "sound picker filter should include common audio formats");
 
@@ -180,7 +193,7 @@ assert.ok(SOUND_FILE_FILTER.includes("*.wav") && SOUND_FILE_FILTER.includes("*.m
   assert.equal(setManyUpdates.conversationCustomNotificationSoundPath, newPath, "settings POST should persist the new scoped conversation sound path");
   assert.equal(response.settings.conversationCustomNotificationSoundPath, newPath, "settings POST response should reflect the applied runtime snapshot even if getAll is stale");
 
-  p._handleConversationEnd({ message: { stopReason: "end", content: "hello" } }, "C:/HanaAgent/agents/chatgpt/sessions/session.jsonl");
+  await p._handleConversationEnd({ message: { stopReason: "end", content: "hello" } }, "C:/HanaAgent/agents/chatgpt/sessions/session.jsonl");
   assert.equal(shown.length, 1, "conversation end should emit one custom toast");
   assert.equal(shown[0].customSoundPath, newPath, "conversation notification should use the just-saved scoped custom sound path, not stale getAll data");
 }

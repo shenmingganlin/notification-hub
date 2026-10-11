@@ -1,667 +1,757 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 2,
   "id": "notification-hub",
   "name": "Notification Hub",
-  "version": "0.2.1",
-  "description": "对话结束与频道新消息的桌面通知系统,支持头像、堆叠、角色风格背景,并在右上角小组件中查看通知历史",
-  "minAppVersion": "0.158.0",
-  "trust": "full-access",
-  "activationEvents": [
-    "onStartup"
+  "version": "0.3.55",
+  "description": "桌面通知、通知中心与提示音。",
+  "minAppVersion": "0.978.0",
+  "entry": "entry.mjs",
+  "icon": "assets/icon.svg",
+  "capabilities": [
+    "app/process.spawn",
+    "app/tools.expose-to-model",
+    "app/agents.read",
+    "app/sessions.read"
   ],
-  "ui": {
-    "hostCapabilities": [
-      "external.open"
-    ]
-  },
   "contributes": {
-    "widget": {
-      "title": {
-        "zh": "通",
-        "en": "Notifications"
+    "settings": {
+      "title": "通知中心",
+      "ui": {
+        "route": "/widget.html"
       },
-      "route": "/widget"
-    },
-    "configuration": {
-      "properties": {
-        "enableConversationNotification": {
-          "type": "boolean",
-          "title": "对话结束通知",
-          "description": "Agent 回复完成时在桌面右下角弹窗",
-          "default": true
-        },
-        "enableChannelNotification": {
-          "type": "boolean",
-          "title": "频道消息通知",
-          "description": "频道有新消息时在桌面右下角弹窗。",
-          "default": true
-        },
-        "conversationNotificationSoundTheme": {
-          "type": "string",
-          "title": "聊天提示音主题",
-          "description": "Agent 对话回复完成时使用的提示音。选择“自定义声音”后使用聊天自定义提示音路径。",
-          "enum": [
-            "ding",
-            "chime",
-            "notify",
-            "system",
-            "alert",
-            "alarm",
-            "custom",
-            "off"
-          ],
-          "enumNames": [
-            "铃铛叮声",
-            "钟声",
-            "Windows 通知音",
-            "系统提示音",
-            "警报提示音",
-            "警铃提示音",
-            "自定义声音",
-            "静音"
-          ],
-          "default": "chime"
-        },
-        "conversationCustomNotificationSoundPath": {
-          "type": "string",
-          "title": "聊天自定义提示音路径",
-          "description": "聊天提示音主题选择“自定义声音”时使用的本地音频文件路径。支持 wav、mp3、m4a、aac、wma。播放失败会回退到内置钟声或系统提示音。",
-          "default": "",
-          "ui": {
-            "control": "text"
+      "schema": {
+        "properties": {
+          "enableConversationNotification": {
+            "type": "boolean",
+            "title": "对话结束通知",
+            "description": "Agent 回复完成时在桌面右下角弹窗",
+            "default": true
+          },
+          "enableConversationMerge": {
+            "type": "boolean",
+            "title": "六十秒合并",
+            "description": "同一会话 60 秒内的连续回复在列表里合成一行。每一条仍然弹窗、仍然出声。关闭后各自占一行。",
+            "default": true
+          },
+          "enableChannelNotification": {
+            "type": "boolean",
+            "title": "频道消息通知",
+            "description": "频道有新消息时在桌面右下角弹窗。",
+            "default": true
+          },
+          "conversationNotificationSoundTheme": {
+            "type": "string",
+            "title": "聊天提示音",
+            "description": "聊天通知使用的提示音。选择“静音”即可关闭。选择“自定义声音”后使用聊天自定义声音。",
+            "enum": [
+              "ding",
+              "chime",
+              "notify",
+              "system",
+              "alert",
+              "alarm",
+              "custom",
+              "off"
+            ],
+            "default": "chime",
+            "ui": {
+              "enumLabels": [
+                "铃铛叮声",
+                "钟声",
+                "Windows 通知音",
+                "系统提示音",
+                "警报提示音",
+                "警铃提示音",
+                "自定义声音",
+                "静音"
+              ]
+            }
+          },
+          "conversationCustomNotificationSoundPath": {
+            "type": "string",
+            "title": "聊天自定义声音",
+            "description": "聊天提示音选择“自定义声音”时使用。支持 wav、mp3、m4a、aac、wma。播放失败会回退到内置钟声或系统提示音。",
+            "default": "",
+            "ui": {
+              "control": "text"
+            }
+          },
+          "channelNotificationSoundTheme": {
+            "type": "string",
+            "title": "频道提示音",
+            "description": "频道通知使用的提示音。选择“静音”即可关闭。选择“自定义声音”后使用频道自定义声音。",
+            "enum": [
+              "ding",
+              "chime",
+              "notify",
+              "system",
+              "alert",
+              "alarm",
+              "custom",
+              "off"
+            ],
+            "default": "chime",
+            "ui": {
+              "enumLabels": [
+                "铃铛叮声",
+                "钟声",
+                "Windows 通知音",
+                "系统提示音",
+                "警报提示音",
+                "警铃提示音",
+                "自定义声音",
+                "静音"
+              ]
+            }
+          },
+          "channelCustomNotificationSoundPath": {
+            "type": "string",
+            "title": "频道自定义声音",
+            "description": "频道提示音选择“自定义声音”时使用。支持 wav、mp3、m4a、aac、wma。播放失败会回退到内置钟声或系统提示音。",
+            "default": "",
+            "ui": {
+              "control": "text"
+            }
+          },
+          "enableKeywordImportance": {
+            "type": "boolean",
+            "title": "启用关键词重要通知",
+            "description": "命中关键词的通知升格为重要。",
+            "default": true
+          },
+          "notificationKeywords": {
+            "type": "string",
+            "title": "重要关键词",
+            "description": "用逗号、分号或换行分隔。命中这些词的通知会升格为重要通知。",
+            "default": "紧急, 重要, bug, 报错, 失败, 完成了, error, failed, urgent, important",
+            "ui": {
+              "control": "textarea"
+            }
+          },
+          "importantNotificationSound": {
+            "type": "boolean",
+            "title": "重要通知提示音",
+            "description": "关键词命中的重要通知是否播放提示音。",
+            "default": true
+          },
+          "importantNotificationSoundTheme": {
+            "type": "string",
+            "title": "重要通知提示音主题",
+            "description": "重要通知使用的提示音主题。选择自定义声音后使用重要通知专属声音，未填写时继承状态/兜底自定义声音。",
+            "enum": ["ding", "chime", "notify", "system", "alert", "alarm", "custom", "off"],
+            "default": "alert",
+            "ui": {
+              "enumLabels": ["铃铛叮声", "钟声", "Windows 通知音", "系统提示音", "警报提示音", "警铃提示音", "自定义声音", "静音"]
+            }
+          },
+          "importantCustomNotificationSoundPath": {
+            "type": "string",
+            "title": "重要通知自定义声音",
+            "description": "重要通知主题选择自定义声音时使用。支持 wav、mp3、m4a、aac、wma。留空时继承状态/兜底自定义声音。",
+            "default": "",
+            "ui": { "control": "text" }
+          },
+          "notificationSoundTheme": {
+            "type": "string",
+            "title": "状态/兜底提示音",
+            "description": "状态、错误和其他未分来源通知使用的提示音，也作为旧配置兜底。聊天和频道可在通知中心分别配置。",
+            "enum": [
+              "ding",
+              "chime",
+              "notify",
+              "system",
+              "alert",
+              "alarm",
+              "custom",
+              "off"
+            ],
+            "default": "chime",
+            "ui": {
+              "enumLabels": [
+                "铃铛叮声",
+                "钟声",
+                "Windows 通知音",
+                "系统提示音",
+                "警报提示音",
+                "警铃提示音",
+                "自定义声音",
+                "静音"
+              ]
+            }
+          },
+          "customNotificationSoundPath": {
+            "type": "string",
+            "title": "状态/兜底自定义声音",
+            "description": "状态/兜底提示音选择“自定义声音”时使用。支持 wav、mp3、m4a、aac、wma。聊天和频道未填路径时也会继承它。",
+            "default": "",
+            "ui": {
+              "control": "text"
+            }
+          },
+          "enableStatusNotifications": {
+            "type": "boolean",
+            "title": "状态监控通知",
+            "description": "Hana 转发来的状态通知。不控制错误和任务完成。",
+            "default": true
+          },
+          "enableErrorNotifications": {
+            "type": "boolean",
+            "title": "错误/失败通知",
+            "description": "运行异常或失败时弹窗。",
+            "default": true
+          },
+          "enableTaskDoneNotifications": {
+            "type": "boolean",
+            "title": "任务完成通知",
+            "description": "后台任务或定时任务完成时弹窗。默认关闭，避免刷屏。",
+            "default": false
+          },
+          "notificationCenterLimit": {
+            "type": "integer",
+            "title": "列表显示条数",
+            "description": "通知中心最多显示多少条。文件里仍保留最近 200 条。",
+            "default": 30,
+            "minimum": 10,
+            "maximum": 200
+          },
+          "enableChannelAggregation": {
+            "type": "boolean",
+            "title": "频道聚合摘要",
+            "description": "短时间内频道普通消息过多时合并为一条摘要通知。重要通知会立即弹出,不参与聚合。",
+            "default": false
+          },
+          "channelAggregationWindowSeconds": {
+            "type": "integer",
+            "title": "聚合窗口秒数",
+            "description": "在多少秒内累计频道普通消息。少于阈值时到点会按原消息逐条发出。",
+            "default": 30,
+            "minimum": 5,
+            "maximum": 300,
+            "ui": {
+              "control": "number"
+            }
+          },
+          "channelAggregationThreshold": {
+            "type": "integer",
+            "title": "聚合触发条数",
+            "description": "窗口内达到多少条普通频道消息后立刻合并为摘要。",
+            "default": 4,
+            "minimum": 2,
+            "maximum": 50,
+            "ui": {
+              "control": "number"
+            }
+          },
+          "notificationDisplayMode": {
+            "type": "string",
+            "title": "通知显示方式",
+            "description": "选择通知出现在哪里：自定义弹窗，或只记录到通知中心。一次只会显示一种。",
+            "enum": [
+              "custom",
+              "off"
+            ],
+            "default": "custom",
+            "ui": {
+              "enumLabels": [
+                "自定义弹窗",
+                "仅记录到列表"
+              ]
+            }
+          },
+          "visualComboPack": {
+            "type": "string",
+            "title": "组合包",
+            "description": "一键套用弹窗风格、登场效果、粒子形状、粒子轨迹、物理手感、弹窗配色和面板主题。选自定义可手动微调。",
+            "enum": [
+              "custom",
+              "magicAir",
+              "cyberBurst",
+              "auroraPrism",
+              "physicalToys",
+              "sakuraOverdrive",
+              "blackGoldMachine",
+              "emberComet",
+              "moonlitHolo"
+            ],
+            "default": "custom",
+            "ui": {
+              "enumLabels": [
+                "自定义",
+                "魔法空气包",
+                "赛博爆裂包",
+                "极光棱镜包",
+                "物理玩具包",
+                "樱花暴走包",
+                "黑金机械包",
+                "余烬彗星包",
+                "月夜全息包"
+              ]
+            }
+          },
+          "toastLayout": {
+            "type": "string",
+            "title": "弹窗布局",
+            "description": "控制头像、标题、正文、角色名和标签的排版结构。",
+            "enum": [
+              "hero",
+              "clean",
+              "headline",
+              "dialogue",
+              "timeline"
+            ],
+            "default": "clean",
+            "ui": {
+              "enumLabels": [
+                "角色名片",
+                "清透卡片",
+                "标题电报",
+                "对话便签",
+                "时间流卡片"
+              ]
+            }
+          },
+          "toastScale": {
+            "type": "number",
+            "title": "弹窗大小",
+            "description": "等比例缩放整张自定义弹窗，文字、头像、间距会一起缩放。1.0 为原始大小。",
+            "minimum": 0.7,
+            "maximum": 1.2,
+            "default": 1
+          },
+          "toastOffsetX": {
+            "type": "integer",
+            "title": "弹窗水平偏移",
+            "description": "负数向左，正数向右。允许把弹窗推到屏幕工作区之外。",
+            "minimum": -1600,
+            "maximum": 1600,
+            "default": 0
+          },
+          "toastOffsetY": {
+            "type": "integer",
+            "title": "弹窗垂直偏移",
+            "description": "负数向上，正数向下。允许把弹窗推到屏幕工作区之外。",
+            "minimum": -1000,
+            "maximum": 1000,
+            "default": 0
+          },
+          "toastTransportMode": {
+            "type": "string",
+            "title": "弹窗舞动风格",
+            "description": "只控制弹窗运动与编队方式：群舞弹簧保留共享栈物理，独奏轻弹让每张卡片独立运动。",
+            "enum": [
+              "managed",
+              "independent"
+            ],
+            "default": "managed",
+            "ui": {
+              "enumLabels": [
+                "群舞弹簧",
+                "独奏轻弹"
+              ]
+            }
+          },
+          "toastStyle": {
+            "type": "string",
+            "title": "卡片风格",
+            "description": "右下角自定义弹窗的卡片外观。",
+            "enum": [
+              "classic",
+              "minimal",
+              "glass",
+              "tech",
+              "aurora",
+              "sakura-storm",
+              "obsidian",
+              "hologram",
+              "paper"
+            ],
+            "default": "classic",
+            "ui": {
+              "enumLabels": [
+                "经典柔和",
+                "极简纸片",
+                "琉璃玻璃",
+                "霓虹赛博",
+                "极光晶格",
+                "樱暴绯云",
+                "黑金机械",
+                "全息薄膜",
+                "温润纸笺"
+              ]
+            }
+          },
+          "particleShape": {
+            "type": "string",
+            "title": "粒子形状",
+            "description": "弹窗退场时释放的粒子形状。关闭粒子退场后，这个形状不会被放出来。",
+            "enum": [
+              "none",
+              "moss",
+              "sakura",
+              "snowflake",
+              "butterfly",
+              "bubble",
+              "windmill",
+              "star",
+              "spark",
+              "shard",
+              "leaf",
+              "pixel",
+              "comet",
+              "gear",
+              "ember",
+              "crescent",
+              "slash"
+            ],
+            "default": "sakura",
+            "ui": {
+              "enumLabels": [
+                "无",
+                "苔花",
+                "樱花",
+                "雪花",
+                "蝴蝶",
+                "气泡",
+                "风车",
+                "星芒",
+                "火花",
+                "晶片",
+                "叶片",
+                "像素块",
+                "彗星",
+                "金属齿轮",
+                "余烬火羽",
+                "月牙",
+                "光刃"
+              ]
+            }
+          },
+          "autoParticleCountScale": {
+            "type": "number",
+            "title": "自动粒子数量",
+            "description": "自动消失时释放的粒子数量倍率。1.0 为标准，数值越大越密。",
+            "minimum": 0.2,
+            "maximum": 4,
+            "default": 1
+          },
+          "manualParticleCountScale": {
+            "type": "number",
+            "title": "手动粒子数量",
+            "description": "手动关闭或点击退场时释放的粒子数量倍率。",
+            "minimum": 0.2,
+            "maximum": 4,
+            "default": 1
+          },
+          "particleSizeScale": {
+            "type": "number",
+            "title": "粒子大小",
+            "description": "统一调节退场粒子的绘制大小。",
+            "minimum": 0.5,
+            "maximum": 3,
+            "default": 1
+          },
+          "particleIntervalEffect": {
+            "type": "number",
+            "title": "粒子间隔",
+            "description": "调节粒子出现的时间间隔。0 为原始瞬爆，数值越大越像连续喷涌/星雨。",
+            "minimum": 0,
+            "maximum": 100,
+            "default": 0
+          },
+          "cardExitMode": {
+            "type": "string",
+            "title": "退场方式",
+            "description": "卡片消失时沿入场反方向滑回右侧，或停在原地直接收掉。组合包不会改这一项。",
+            "enum": [
+              "trajectory",
+              "instant"
+            ],
+            "default": "trajectory",
+            "ui": {
+              "enumLabels": [
+                "滑回右侧",
+                "直接消失"
+              ]
+            }
+          },
+          "cardExitFade": {
+            "type": "boolean",
+            "title": "退场淡化",
+            "description": "开启时卡片渐渐变淡。关闭后保持不透明，到点直接收掉。组合包不会改这一项。",
+            "default": true
+          },
+          "entranceVisual": {
+            "type": "string",
+            "title": "登场效果",
+            "description": "只控制弹窗进入时的视觉效果,不改变窗体运动。",
+            "enum": [
+              "ripple-bloom",
+              "edge-glow",
+              "breath-fade",
+              "comet-trail",
+              "metal-sweep",
+              "triangle-bloom",
+              "veil-clear",
+              "cloud-burst"
+            ],
+            "default": "ripple-bloom",
+            "ui": {
+              "enumLabels": [
+                "波纹绽放",
+                "边缘微光",
+                "呼吸淡入",
+                "彗尾划过",
+                "金属掠光",
+                "三角绽放",
+                "渐变揭幕",
+                "云雾缭绕"
+              ]
+            }
+          },
+          "autoDismissMotion": {
+            "type": "string",
+            "title": "自动粒子轨迹",
+            "description": "通知停留时间结束后自动消失时，粒子走的轨迹。不移动卡片。",
+            "enum": [
+              "drift",
+              "circle-burst",
+              "rect-burst",
+              "x-burst",
+              "vortex",
+              "ribbon-flow",
+              "gravity-fall",
+              "orbit-decay",
+              "bubble-rise",
+              "windmill-gust",
+              "shatter-lines",
+              "pixel-rain",
+              "magnet-snap"
+            ],
+            "default": "drift",
+            "ui": {
+              "enumLabels": [
+                "飘散",
+                "圆形爆发",
+                "矩形爆发",
+                "X爆发",
+                "漩涡",
+                "丝带气流",
+                "重力坠落",
+                "轨道衰减",
+                "气泡上浮",
+                "风车阵风",
+                "晶裂线",
+                "像素雨",
+                "磁吸弹射"
+              ]
+            }
+          },
+          "manualDismissMotion": {
+            "type": "string",
+            "title": "手动粒子轨迹",
+            "description": "点击关闭时粒子走的轨迹。不移动卡片。",
+            "enum": [
+              "drift",
+              "circle-burst",
+              "rect-burst",
+              "click-burst",
+              "x-burst",
+              "vortex",
+              "ribbon-flow",
+              "gravity-fall",
+              "orbit-decay",
+              "bubble-rise",
+              "windmill-gust",
+              "shatter-lines",
+              "pixel-rain",
+              "magnet-snap"
+            ],
+            "default": "click-burst",
+            "ui": {
+              "enumLabels": [
+                "飘散",
+                "圆形爆发",
+                "矩形爆发",
+                "鼠标位置爆发",
+                "X爆发",
+                "漩涡",
+                "丝带气流",
+                "重力坠落",
+                "轨道衰减",
+                "气泡上浮",
+                "风车阵风",
+                "晶裂线",
+                "像素雨",
+                "磁吸弹射"
+              ]
+            }
+          },
+          "physicsPreset": {
+            "type": "string",
+            "title": "物理手感",
+            "description": "控制弹窗进入和堆叠补位的弹簧手感。不移动退场中的卡片。",
+            "enum": [
+              "soft",
+              "lively",
+              "snappy",
+              "wild"
+            ],
+            "default": "lively",
+            "ui": {
+              "enumLabels": [
+                "柔和",
+                "灵动",
+                "紧致",
+                "夸张"
+              ]
+            }
+          },
+          "panelTheme": {
+            "type": "string",
+            "title": "面板主题",
+            "description": "通知中心这一页的主题。自动时跟随界面深浅。读不到界面主题时，才用组合包的面板主题。",
+            "enum": [
+              "auto",
+              "classic",
+              "minimal",
+              "glass",
+              "tech",
+              "aurora",
+              "sakura-storm",
+              "obsidian",
+              "hologram",
+              "paper",
+              "ember",
+              "moonlight"
+            ],
+            "default": "auto",
+            "ui": {
+              "enumLabels": [
+                "跟随组合包或界面",
+                "经典柔和",
+                "极简纸片",
+                "琉璃玻璃",
+                "霓虹赛博",
+                "极光晶格",
+                "樱暴绯云",
+                "黑金机械",
+                "全息薄膜",
+                "温润纸笺",
+                "余烬彗星",
+                "月夜全息"
+              ]
+            }
+          },
+          "notificationWidgetDensity": {
+            "type": "string",
+            "title": "通知中心显示密度",
+            "description": "控制通知中心这一页的字号。当前“宽松大字”为最小档。",
+            "enum": [
+              "spacious",
+              "large",
+              "huge"
+            ],
+            "default": "spacious",
+            "ui": {
+              "enumLabels": [
+                "宽松大字",
+                "超大醒目",
+                "巨幕阅读"
+              ]
+            }
+          },
+          "notificationWidgetSourceTint": {
+            "type": "boolean",
+            "title": "按来源染色",
+            "description": "在通知中心面板里按通知来源给聊天、频道、状态通知使用不同色系。",
+            "default": false
+          },
+          "sakuraEnabled": {
+            "type": "boolean",
+            "title": "粒子退场",
+            "description": "关闭后不释放粒子。卡片仍按退场方式收掉。保存后立即生效。",
+            "default": true
+          },
+          "sakuraTheme": {
+            "type": "string",
+            "title": "弹窗配色",
+            "description": "选择弹窗与退场粒子的颜色主题。选择「自动」会按 Agent 自动选择专属配色。",
+            "enum": [
+              "auto",
+              "hanako",
+              "butter",
+              "chatgpt",
+              "ming",
+              "kong",
+              "rainbow",
+              "sakurastorm",
+              "blackgold",
+              "ember",
+              "moonlight",
+              "neonmint"
+            ],
+            "default": "auto",
+            "ui": {
+              "enumLabels": [
+                "自动(按 Agent)",
+                "Hanako 粉樱",
+                "Butter 暖金",
+                "ChatGPT 冷蓝",
+                "Ming 紫罗兰",
+                "Kong 翡翠",
+                "彩虹缤纷",
+                "樱花暴走",
+                "黑金机械",
+                "余烬橙金",
+                "月光蓝紫",
+                "薄荷霓虹"
+              ]
+            }
+          },
+          "clickAction": {
+            "type": "boolean",
+            "title": "点击后高亮",
+            "description": "点击弹窗后写入点击记录，通知页高亮对应一条。关闭后点击只关闭弹窗。保存后立即生效，不用重启。",
+            "default": true
+          },
+          "quietHoursEnabled": {
+            "type": "boolean",
+            "title": "免打扰时段",
+            "description": "开启后，在开始和结束之间不弹窗。通知仍写入列表。开始和结束相同则不生效。可以跨过午夜。",
+            "default": false
+          },
+          "quietHoursStart": {
+            "type": "string",
+            "title": "免打扰开始",
+            "description": "24 小时制，例如 23:00。",
+            "default": "23:00"
+          },
+          "quietHoursEnd": {
+            "type": "string",
+            "title": "免打扰结束",
+            "description": "到达这一分钟时恢复弹窗，例如 07:00。",
+            "default": "07:00"
+          },
+          "mutedSessionKeys": {
+            "type": "string",
+            "title": "已静音的会话",
+            "description": "一行一个。会话写成 session:路径，频道写成 channel:频道名。这些来源仍写入列表，但不再弹窗。",
+            "default": ""
           }
-        },
-        "channelNotificationSoundTheme": {
-          "type": "string",
-          "title": "频道提示音主题",
-          "description": "频道新消息使用的提示音。选择“自定义声音”后使用频道自定义提示音路径。",
-          "enum": [
-            "ding",
-            "chime",
-            "notify",
-            "system",
-            "alert",
-            "alarm",
-            "custom",
-            "off"
-          ],
-          "enumNames": [
-            "铃铛叮声",
-            "钟声",
-            "Windows 通知音",
-            "系统提示音",
-            "警报提示音",
-            "警铃提示音",
-            "自定义声音",
-            "静音"
-          ],
-          "default": "chime"
-        },
-        "channelCustomNotificationSoundPath": {
-          "type": "string",
-          "title": "频道自定义提示音路径",
-          "description": "频道提示音主题选择“自定义声音”时使用的本地音频文件路径。支持 wav、mp3、m4a、aac、wma。播放失败会回退到内置钟声或系统提示音。",
-          "default": "",
-          "ui": {
-            "control": "text"
-          }
-        },
-        "enableKeywordImportance": {
-          "type": "boolean",
-          "title": "关键词重要通知",
-          "description": "当通知正文或标题命中关键词时,将通知升格为 important,并使用更醒目的视觉样式。",
-          "default": true
-        },
-        "notificationKeywords": {
-          "type": "string",
-          "title": "重要关键词",
-          "description": "用逗号、分号或换行分隔。命中这些词的通知会升格为重要通知。",
-          "default": "紧急, 重要, bug, 报错, 失败, 完成了, error, failed, urgent, important",
-          "ui": {
-            "control": "textarea"
-          }
-        },
-        "importantNotificationSound": {
-          "type": "boolean",
-          "title": "重要通知提示音",
-          "description": "关键词命中的重要通知是否播放提示音。",
-          "default": true
-        },
-        "notificationSoundTheme": {
-          "type": "string",
-          "title": "状态/重要通知提示音",
-          "description": "选择状态警报、错误通知和其他未分来源通知使用的提示音。聊天和频道可在通知中心设置页里分别配置。",
-          "enum": [
-            "ding",
-            "chime",
-            "notify",
-            "system",
-            "alert",
-            "alarm",
-            "custom",
-            "off"
-          ],
-          "enumNames": [
-            "铃铛叮声",
-            "钟声",
-            "Windows 通知音",
-            "系统提示音",
-            "警报提示音",
-            "警铃提示音",
-            "自定义声音",
-            "静音"
-          ],
-          "default": "chime"
-        },
-        "customNotificationSoundPath": {
-          "type": "string",
-          "title": "状态/重要自定义提示音路径",
-          "description": "状态/重要通知提示音选择“自定义声音”时使用的本地音频文件路径。支持 wav、mp3、m4a、aac、wma。聊天和频道也会把这个旧字段作为兼容兜底。",
-          "default": "",
-          "ui": {
-            "control": "text"
-          }
-        },
-        "enableStatusNotifications": {
-          "type": "boolean",
-          "title": "Agent 状态监控",
-          "description": "监听 HanaAgent 后台任务、定时任务和错误事件,并通过桌面通知提醒。",
-          "default": true
-        },
-        "enableErrorNotifications": {
-          "type": "boolean",
-          "title": "错误/失败通知",
-          "description": "插件错误、任务失败、模型或会话发送失败时弹出重要通知。",
-          "default": true
-        },
-        "enableTaskDoneNotifications": {
-          "type": "boolean",
-          "title": "任务完成通知",
-          "description": "后台任务或定时任务完成时弹出通知。默认关闭,避免过多打扰。",
-          "default": false
-        },
-        "enableChannelAggregation": {
-          "type": "boolean",
-          "title": "频道聚合摘要",
-          "description": "短时间内频道普通消息过多时合并为一条摘要通知。重要通知会立即弹出,不参与聚合。",
-          "default": false
-        },
-        "channelAggregationWindowSeconds": {
-          "type": "integer",
-          "title": "频道聚合窗口",
-          "description": "普通频道消息在多少秒内累计后判断是否聚合。",
-          "default": 30,
-          "minimum": 5,
-          "maximum": 300,
-          "ui": {
-            "control": "number"
-          }
-        },
-        "channelAggregationThreshold": {
-          "type": "integer",
-          "title": "频道聚合阈值",
-          "description": "聚合窗口内达到多少条普通频道消息后合并成摘要。未达到阈值时会按原样发出。",
-          "default": 4,
-          "minimum": 2,
-          "maximum": 50,
-          "ui": {
-            "control": "number"
-          }
-        },
-        "notificationDisplayMode": {
-          "type": "string",
-          "title": "通知显示方式",
-          "description": "选择弹窗出口:自定义漂亮弹窗、Windows 原生通知,或只记录到右上角通知小组件。一次只会显示一种。",
-          "enum": [
-            "custom",
-            "native",
-            "off"
-          ],
-          "enumNames": [
-            "自定义漂亮弹窗",
-            "Windows 原生通知",
-            "不弹窗,仅记录"
-          ],
-          "default": "custom"
-        },
-        "visualComboPack": {
-          "type": "string",
-          "title": "视觉组合包",
-          "description": "一键套用弹窗风格、登场效果、粒子贴图、退场轨迹、物理手感和弹窗配色。选择后仍可在设置页继续微调。",
-          "enum": [
-            "custom",
-            "magicAir",
-            "cyberBurst",
-            "auroraPrism",
-            "physicalToys",
-            "sakuraOverdrive",
-            "blackGoldMachine",
-            "emberComet",
-            "moonlitHolo"
-          ],
-          "enumNames": [
-            "自定义",
-            "魔法空气包",
-            "赛博爆裂包",
-            "极光棱镜包",
-            "物理玩具包",
-            "樱花暴走包",
-            "黑金机械包",
-            "余烬彗星包",
-            "月夜全息包"
-          ],
-          "default": "custom"
-        },
-        "toastLayout": {
-          "type": "string",
-          "title": "弹窗布局",
-          "description": "控制头像、标题、正文、角色名和标签的排版结构。",
-          "enum": [
-            "hero",
-            "clean",
-            "headline",
-            "dialogue",
-            "timeline"
-          ],
-          "enumNames": [
-            "角色名片",
-            "清透卡片",
-            "标题电报",
-            "对话便签",
-            "时间流卡片"
-          ],
-          "default": "clean"
-        },
-        "toastScale": {
-          "type": "number",
-          "title": "弹窗大小",
-          "description": "等比例缩放整张自定义弹窗，文字、头像、间距会一起缩放。1.0 为原始大小。",
-          "minimum": 0.7,
-          "maximum": 1.2,
-          "default": 1.0
-        },
-        "toastOffsetX": {
-          "type": "integer",
-          "title": "弹窗水平偏移",
-          "description": "调整弹窗显示位置。负数向左，正数向右。",
-          "minimum": -1600,
-          "maximum": 1600,
-          "default": 0
-        },
-        "toastOffsetY": {
-          "type": "integer",
-          "title": "弹窗垂直偏移",
-          "description": "调整弹窗显示位置。负数向上，正数向下。",
-          "minimum": -1000,
-          "maximum": 1000,
-          "default": 0
-        },
-        "toastTransportMode": {
-          "type": "string",
-          "title": "弹窗舞动风格",
-          "description": "只控制弹窗运动与编队方式。群舞弹簧共享同一个物理世界，独奏轻弹让每张卡片独立运动。以后新的弹窗运动逻辑会加在这里。",
-          "enum": [
-            "managed",
-            "independent"
-          ],
-          "enumNames": [
-            "群舞弹簧",
-            "独奏轻弹"
-          ],
-          "default": "managed"
-        },
-        "toastStyle": {
-          "type": "string",
-          "title": "弹窗风格",
-          "description": "控制右下角自定义弹窗卡片的视觉样式。",
-          "enum": [
-            "classic",
-            "minimal",
-            "glass",
-            "tech",
-            "aurora",
-            "sakura-storm",
-            "obsidian",
-            "hologram",
-            "paper"
-          ],
-          "enumNames": [
-            "经典柔和",
-            "极简纸片",
-            "琉璃玻璃",
-            "霓虹赛博",
-            "极光晶格",
-            "樱暴绯云",
-            "黑金机械",
-            "全息薄膜",
-            "温润纸笺"
-          ],
-          "default": "classic"
-        },
-        "dismissEffect": {
-          "type": "string",
-          "title": "旧版消失动画(兼容)",
-          "description": "旧版单字段消失动画配置,保留用于兼容。新版请使用粒子贴图、自动消失轨迹和手动关闭轨迹。",
-          "enum": [
-            "fade",
-            "sakura"
-          ],
-          "enumNames": [
-            "淡出",
-            "樱花飘散"
-          ],
-          "default": "sakura"
-        },
-        "particleShape": {
-          "type": "string",
-          "title": "消失粒子",
-          "description": "控制弹窗消失时飞散的粒子形状。",
-          "enum": [
-            "none",
-            "moss",
-            "sakura",
-            "snowflake",
-            "butterfly",
-            "bubble",
-            "windmill",
-            "star",
-            "spark",
-            "shard",
-            "leaf",
-            "pixel",
-            "comet",
-            "gear",
-            "ember",
-            "crescent",
-            "slash"
-          ],
-          "enumNames": [
-            "无",
-            "苔花",
-            "樱花",
-            "雪花",
-            "蝴蝶",
-            "气泡",
-            "风车",
-            "星芒",
-            "火花",
-            "晶片",
-            "叶片",
-            "像素块",
-            "彗星",
-            "金属齿轮",
-            "余烬火羽",
-            "月牙",
-            "光刃"
-          ],
-          "default": "sakura"
-        },
-        "autoParticleCountScale": {
-          "type": "number",
-          "title": "自动粒子数量倍率",
-          "description": "自动消失时释放的粒子数量倍率。1.0 为标准，数值越大越密。",
-          "minimum": 0.2,
-          "maximum": 4.0,
-          "default": 1.0
-        },
-        "manualParticleCountScale": {
-          "type": "number",
-          "title": "手动粒子数量倍率",
-          "description": "手动关闭或点击退场时释放的粒子数量倍率。",
-          "minimum": 0.2,
-          "maximum": 4.0,
-          "default": 1.0
-        },
-        "particleSizeScale": {
-          "type": "number",
-          "title": "粒子大小倍率",
-          "description": "统一调节退场粒子的绘制大小。",
-          "minimum": 0.5,
-          "maximum": 3.0,
-          "default": 1.0
-        },
-        "particleIntervalEffect": {
-          "type": "number",
-          "title": "粒子间隔效果",
-          "description": "调节粒子出现的时间间隔。0 为原始瞬爆，数值越大越像连续喷涌/星雨。",
-          "minimum": 0,
-          "maximum": 100,
-          "default": 0
-        },
-        "entranceVisual": {
-          "type": "string",
-          "title": "弹窗登场效果",
-          "description": "只控制弹窗进入时的视觉效果，不改变窗体运动。",
-          "enum": [
-            "classic",
-            "fade",
-            "gather",
-            "scan",
-            "stardust",
-            "prism"
-          ],
-          "enumNames": [
-            "经典光晕",
-            "柔光浮现",
-            "裂痕拼合",
-            "扫描切入",
-            "星尘凝结",
-            "棱镜折射"
-          ],
-          "default": "classic"
-        },
-        "autoDismissMotion": {
-          "type": "string",
-          "title": "自动消失轨迹",
-          "description": "通知停留时间结束后自动消失时使用的动画轨迹。",
-          "enum": [
-            "drift",
-            "circle-burst",
-            "rect-burst",
-            "x-burst",
-            "vortex",
-            "ribbon-flow",
-            "gravity-fall",
-            "orbit-decay",
-            "bubble-rise",
-            "windmill-gust",
-            "shatter-lines",
-            "pixel-rain",
-            "magnet-snap"
-          ],
-          "enumNames": [
-            "飘散",
-            "圆形爆发",
-            "矩形爆发",
-            "X爆发",
-            "漩涡",
-            "丝带气流",
-            "重力坠落",
-            "轨道衰减",
-            "气泡上浮",
-            "风车阵风",
-            "晶裂线",
-            "像素雨",
-            "磁吸弹射"
-          ],
-          "default": "drift"
-        },
-        "manualDismissMotion": {
-          "type": "string",
-          "title": "手动关闭轨迹",
-          "description": "点击关闭或手动触发关闭时使用的动画轨迹。",
-          "enum": [
-            "drift",
-            "circle-burst",
-            "rect-burst",
-            "click-burst",
-            "x-burst",
-            "vortex",
-            "ribbon-flow",
-            "gravity-fall",
-            "orbit-decay",
-            "bubble-rise",
-            "windmill-gust",
-            "shatter-lines",
-            "pixel-rain",
-            "magnet-snap"
-          ],
-          "enumNames": [
-            "飘散",
-            "圆形爆发",
-            "矩形爆发",
-            "鼠标位置爆发",
-            "X爆发",
-            "漩涡",
-            "丝带气流",
-            "重力坠落",
-            "轨道衰减",
-            "气泡上浮",
-            "风车阵风",
-            "晶裂线",
-            "像素雨",
-            "磁吸弹射"
-          ],
-          "default": "click-burst"
-        },
-        "physicsPreset": {
-          "type": "string",
-          "title": "物理手感",
-          "description": "控制弹窗进入、堆叠补位和退场微动的弹簧手感。",
-          "enum": [
-            "soft",
-            "lively",
-            "snappy",
-            "wild"
-          ],
-          "enumNames": [
-            "柔和",
-            "灵动",
-            "紧致",
-            "夸张"
-          ],
-          "default": "lively"
-        },
-        "panelTheme": {
-          "type": "string",
-          "title": "面板主题",
-          "description": "右上角「通」按钮和通知中心面板的主题。自动模式会跟随当前组合包。",
-          "enum": [
-            "auto",
-            "classic",
-            "minimal",
-            "glass",
-            "tech",
-            "aurora",
-            "sakura-storm",
-            "obsidian",
-            "hologram",
-            "paper",
-            "ember",
-            "moonlight"
-          ],
-          "enumNames": [
-            "自动匹配组合包",
-            "经典柔和",
-            "极简纸片",
-            "琉璃玻璃",
-            "霓虹赛博",
-            "极光晶格",
-            "樱暴绯云",
-            "黑金机械",
-            "全息薄膜",
-            "温润纸笺",
-            "余烬彗星",
-            "月夜全息"
-          ],
-          "default": "auto"
-        },
-        "notificationWidgetTheme": {
-          "type": "string",
-          "title": "通知小组件明暗模式（旧字段）",
-          "description": "旧版明暗设置，仅用于兼容旧配置。新的通知中心面板外观请使用「面板主题」。",
-          "enum": [
-            "auto",
-            "light",
-            "dark"
-          ],
-          "enumNames": [
-            "自动",
-            "浅色",
-            "暗色"
-          ],
-          "default": "auto"
-        },
-        "notificationWidgetDensity": {
-          "type": "string",
-          "title": "通知小组件显示密度",
-          "description": "控制右上角「通」小组件的字号、间距和整体清晰度。当前“宽松大字”为最小档。",
-          "enum": [
-            "spacious",
-            "large",
-            "huge"
-          ],
-          "enumNames": [
-            "宽松大字",
-            "超大醒目",
-            "巨幕阅读"
-          ],
-          "default": "spacious"
-        },
-
-        "notificationWidgetSourceTint": {
-          "type": "boolean",
-          "title": "按来源染色",
-          "description": "在通知中心面板里按通知来源给聊天、频道、状态通知使用不同色系。",
-          "default": false
-        },
-        "sakuraEnabled": {
-          "type": "boolean",
-          "title": "樱花退场动画",
-          "description": "弹窗消失时使用樱花飘散效果。关闭后弹窗直接淡出。",
-          "default": true
-        },
-        "sakuraTheme": {
-          "type": "string",
-          "title": "弹窗配色",
-          "description": "选择弹窗与退场粒子的颜色主题。选择「自动」会按 Agent 自动选择专属配色。",
-          "enum": [
-            "auto",
-            "hanako",
-            "butter",
-            "chatgpt",
-            "ming",
-            "kong",
-            "rainbow",
-            "sakurastorm",
-            "blackgold",
-            "ember",
-            "moonlight",
-            "neonmint"
-          ],
-          "enumNames": [
-            "自动(按 Agent)",
-            "Hanako 粉樱",
-            "Butter 暖金",
-            "ChatGPT 冷蓝",
-            "Ming 紫罗兰",
-            "Kong 翡翠",
-            "彩虹缤纷",
-            "樱花暴走",
-            "黑金机械",
-            "余烬橙金",
-            "月光蓝紫",
-            "薄荷霓虹"
-          ],
-          "default": "auto"
-        },
-        "clickAction": {
-          "type": "boolean",
-          "title": "弹窗点击跳转",
-          "description": "点击弹窗时跳转到对应对话或频道。关闭后点击仅关闭弹窗。需要重启 HanaAgent 后生效。",
-          "default": true
         }
       }
-    }
+    },
+    "cards": [
+      {
+        "id": "notifications",
+        "face": {
+          "image": "face-4.png"
+        },
+        "title": "通知🌸配置",
+        "description": "查看通知历史，并调整弹窗、提示音和聚合。",
+        "route": "/widget.html",
+        "cardForm": "fill"
+      }
+    ]
   }
 }

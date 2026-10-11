@@ -3,7 +3,7 @@
  *
  * 查询通知历史记录。
  */
-import path from "node:path";
+import { readNotificationRecords } from "../lib/notification-store.js";
 
 export const name = "list-notifications";
 export const description = "查询通知历史记录";
@@ -12,28 +12,18 @@ export const parameters = {
   type: "object",
   properties: {
     limit: { type: "integer", description: "返回条数，默认 10", default: 10 },
-    type: { type: "string", enum: ["conversation", "channel", "dm", "status", ""], description: "筛选通知类型" },
+    // Gemini rejects empty enum values; omit this optional field to query all types.
+    type: { type: "string", enum: ["conversation", "channel", "dm", "status"], description: "筛选通知类型" },
   },
 };
 
 export async function execute(input, ctx) {
   // 从 dataDir 读取 notification store
   const { dataDir, log } = ctx;
-  const storePath = path.join(dataDir, "notifications.jsonl");
-
   try {
-    const fs = await import("node:fs");
-    if (!fs.existsSync(storePath)) {
-      return { content: [{ type: "text", text: "暂无通知记录" }] };
-    }
-
-    const raw = fs.readFileSync(storePath, "utf-8");
-    const lines = raw.trim().split("\n").filter(Boolean);
-    const records = lines
-      .map((line) => {
-        try { return JSON.parse(line); } catch { return null; }
-      })
-      .filter(Boolean);
+    const status = ctx._notificationStore?.storageStatus?.();
+    if (status?.ok === false) throw new Error(status.error);
+    const records = readNotificationRecords(dataDir);
 
     const type = input.type || null;
     const filtered = type ? records.filter((r) => r.type === type) : records;
@@ -55,6 +45,6 @@ export async function execute(input, ctx) {
       details: { count: recent.length, total: records.length, type: type || "all" },
     };
   } catch (err) {
-    return { content: [{ type: "text", text: `查询失败: ${err.message}` }] };
+    return { isError: true, content: [{ type: "text", text: `查询失败: ${err.message}` }] };
   }
 }

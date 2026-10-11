@@ -3,7 +3,7 @@
  *
  * 清空所有通知历史记录。
  */
-import path from "node:path";
+import { writeNotificationRecords } from "../lib/notification-store.js";
 
 export const name = "clear-notifications";
 export const description = "清空所有通知历史记录";
@@ -25,17 +25,15 @@ export async function execute(input, ctx) {
   }
 
   const { dataDir, log } = ctx;
-  const storePath = path.join(dataDir, "notifications.jsonl");
 
   try {
     if (ctx._notificationStore?.clear) {
       ctx._notificationStore.clear();
       return { content: [{ type: "text", text: "已清空所有通知历史记录" }] };
     }
-    const fs = await import("node:fs");
-    fs.writeFileSync(storePath, "", "utf-8");
+    writeNotificationRecords(dataDir, []);
     return { content: [{ type: "text", text: "已清空所有通知历史记录" }] };
   } catch (err) {
-    return { content: [{ type: "text", text: `清空失败: ${err.message}` }] };
+    return { isError: true, content: [{ type: "text", text: `清空失败: ${err.message}` }] };
   }
 }

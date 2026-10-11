@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import Plugin from './index.js';
 
 const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'manifest.json'), 'utf8'));
-const props = manifest.contributes.configuration.properties;
+const props = manifest.contributes.settings?.schema?.properties || manifest.contributes.configuration?.properties;
 if (!props.enableChannelAggregation) throw new Error('enableChannelAggregation missing');
 if (!props.channelAggregationWindowSeconds) throw new Error('channelAggregationWindowSeconds missing');
 if (!props.channelAggregationThreshold) throw new Error('channelAggregationThreshold missing');
@@ -26,6 +27,13 @@ p._cfg = {
 p._channelAggregation = new Map();
 p._channelsDir = 'C:/HanaAgent/test-home/channels';
 p._channelCache = new Map();
+
+const channelFixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'notification-hub-channel-'));
+fs.writeFileSync(path.join(channelFixtureRoot, 'ch_fixture.md'), '---\nname: \'测试频道\' # display name\nid: ch_fixture\n---\n', 'utf8');
+p._channelsDir = channelFixtureRoot;
+const fixtureInfo = await p._resolveChannel('ch_fixture');
+if (fixtureInfo.name !== '测试频道') throw new Error(`channel display name wrong: ${fixtureInfo.name}`);
+fs.rmSync(channelFixtureRoot, { recursive: true, force: true });
 p._store = { push(n) { pushed.push(n); } };
 p._emitDesktopNotification = (n) => emitted.push(n);
 p._agentResolver = {
@@ -39,7 +47,7 @@ p._agentResolver = {
 };
 
 for (let i = 1; i <= 3; i++) {
-  p._handleChannelMessage({
+  await p._handleChannelMessage({
     channelName: 'ch_crew',
     sender: i === 1 ? 'butter' : i === 2 ? 'rational' : 'chatgpt',
     message: { body: `普通消息 ${i}`, timestamp: `t${i}` },
@@ -54,7 +62,7 @@ if (!pushed[0].body.includes('3 条新消息')) throw new Error(`aggregate body 
 
 pushed.length = 0;
 emitted.length = 0;
-p._handleChannelMessage({
+await p._handleChannelMessage({
   channelName: 'ch_crew',
   sender: 'hanako',
   message: { body: '紧急：这条 important 不应该进入聚合', timestamp: 't-important' },
